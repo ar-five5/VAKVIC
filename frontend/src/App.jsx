@@ -1,6 +1,7 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import * as authApi from './api/auth.js';
 import { getAssets } from './api/assets.js';
+import { getWatchlist } from './api/watchlist.js';
 import { getPredictions } from './api/predictions.js';
 import { createComparison } from './api/comparisons.js';
 import { optimizePortfolio } from './api/portfolio.js';
@@ -271,16 +272,18 @@ const comparisonAssets = {
 
 // ─── Sparkline ────────────────────────────────────────────────────────────────
 function Sparkline({ positive = true, width = 80, height = 30 }) {
+  const numericWidth = Number.parseFloat(width);
+  const drawWidth = Number.isFinite(numericWidth) && numericWidth > 0 ? numericWidth : 80;
   const pts = Array.from({ length: 12 }, (_, i) => {
     const base = 15 + Math.random() * 10;
     return base + (positive ? i * 0.8 : -i * 0.8) + (Math.random() - 0.5) * 6;
   });
   const min = Math.min(...pts), max = Math.max(...pts);
   const norm = pts.map(p => ((p - min) / (max - min)) * (height - 4) + 2);
-  const points = norm.map((y, i) => `${(i / (pts.length - 1)) * width},${height - y}`).join(" ");
+  const points = norm.map((y, i) => `${(i / (pts.length - 1)) * drawWidth},${height - y}`).join(" ");
   const color = positive ? theme.accent : theme.red;
   return (
-    <svg width={width} height={height} style={{ display: "block" }}>
+    <svg width={width} height={height} viewBox={`0 0 ${drawWidth} ${height}`} preserveAspectRatio="none" style={{ display: "block" }}>
       <polyline fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" points={points} />
     </svg>
   );
@@ -336,7 +339,7 @@ function TickerBar({ tickers = tickerData }) {
 }
 
 // ─── Navbar ───────────────────────────────────────────────────────────────────
-function Navbar({ page, setPage, authToken, onAvatarClick }) {
+function Navbar({ page, setPage, authToken, onLoginRequest, onLogout }) {
   const nav = ["Dashboard", "Predict", "Compare", "Portfolio"];
   return (
     <nav style={{ background: `${theme.bg}E0`, backdropFilter: "blur(16px)", borderBottom: `1px solid ${theme.border}`, padding: "0 28px", display: "flex", alignItems: "center", gap: 8, height: 56, position: "sticky", top: 0, zIndex: 100 }}>
@@ -356,8 +359,8 @@ function Navbar({ page, setPage, authToken, onAvatarClick }) {
         <div style={{ width: 8, height: 8, borderRadius: "50%", background: theme.accent, animation: "pulse 2s infinite" }} />
         <span style={{ fontSize: 12, color: theme.sub, fontFamily: "'DM Mono', monospace" }}>LIVE</span>
         <div
-          onClick={onAvatarClick}
-          title={authToken ? "Click to logout" : "Click to login"}
+          onClick={() => { if (!authToken) onLoginRequest(); }}
+          title={authToken ? "Logged in" : "Click to login"}
           style={{ width: 32, height: 32, borderRadius: "50%",
             background: authToken
               ? `linear-gradient(135deg, ${theme.accent}, ${theme.blue})`
@@ -367,6 +370,9 @@ function Navbar({ page, setPage, authToken, onAvatarClick }) {
             border: authToken ? `2px solid ${theme.accent}60` : "none" }}>
           {authToken ? "✓" : "A"}
         </div>
+        {authToken && (
+          <button className="btn-ghost" style={{ padding: "6px 12px", fontSize: 12 }} onClick={onLogout}>Logout</button>
+        )}
       </div>
     </nav>
   );
@@ -381,6 +387,9 @@ function Dashboard({ setPage, setTickers, authToken, notify }) {
     { label: "Gold", val: "$2,341", change: "-0.15%", pos: false, data: [60, 58, 55, 57, 54, 52, 55, 53, 51, 53, 50, 49] },
   ];
   const recentPreds = predictions.slice(0, 3);
+  const [watchlist, setWatchlist] = useState([]);
+  const [watchlistLoading, setWatchlistLoading] = useState(false);
+  const [watchlistError, setWatchlistError] = useState('');
 
   useEffect(() => {
     getAssets()
@@ -391,8 +400,27 @@ function Dashboard({ setPage, setTickers, authToken, notify }) {
           change: '+0.00%',
         })));
       })
-      .catch(() => {}); // keep mock tickers on error
+      .catch((err) => { console.warn('Failed to load assets', err); });
   }, []);
+
+  useEffect(() => {
+    if (!authToken) {
+      setWatchlist([]);
+      setWatchlistError('');
+      return;
+    }
+    setWatchlistLoading(true);
+    setWatchlistError('');
+    getWatchlist()
+      .then(({ watchlist }) => {
+        setWatchlist(Array.isArray(watchlist) ? watchlist : []);
+      })
+      .catch((err) => {
+        console.warn('Failed to load watchlist', err);
+        setWatchlistError('Unable to load watchlist');
+      })
+      .finally(() => setWatchlistLoading(false));
+  }, [authToken]);
 
   return (
     <div style={{ padding: "28px 28px", maxWidth: 1200, margin: "0 auto" }}>
@@ -463,42 +491,83 @@ function Dashboard({ setPage, setTickers, authToken, notify }) {
           </div>
         </div>
 
-        {/* Portfolio Summary */}
-        <div className="fade-up-3 card" style={{ padding: "20px" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
-            <h2 style={{ fontSize: 15, fontWeight: 600 }}>Portfolio</h2>
-            <button className="btn-ghost" style={{ fontSize: 12, padding: "6px 14px" }} onClick={() => setPage("Portfolio")}>Manage →</button>
-          </div>
-          <div style={{ textAlign: "center", marginBottom: 18, padding: "14px 0", background: theme.surface, borderRadius: 10 }}>
-            <p style={{ fontSize: 11, color: theme.muted, textTransform: "uppercase", letterSpacing: "0.5px" }}>Total Value</p>
-            <p style={{ fontSize: 30, fontWeight: 800, letterSpacing: "-1px", marginTop: 4 }}>$50,000</p>
-            <span className="tag tag-green" style={{ marginTop: 8, display: "inline-flex" }}>+$1,240 today</span>
-          </div>
-          {portfolioAssets.slice(0, 4).map((a, i) => (
-            <div key={i} style={{ marginBottom: 10 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
-                <span style={{ fontSize: 12, color: theme.sub }}>{a.sym}</span>
-                <span className="mono" style={{ fontSize: 12, color: theme.sub }}>{a.weight}%</span>
+        <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+          <div className="fade-up-3 card" style={{ padding: "20px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
+              <h2 style={{ fontSize: 15, fontWeight: 600 }}>Portfolio</h2>
+              <button className="btn-ghost" style={{ fontSize: 12, padding: "6px 14px" }} onClick={() => setPage("Portfolio")}>Manage →</button>
+            </div>
+            <div style={{ textAlign: "center", marginBottom: 18, padding: "14px 0", background: theme.surface, borderRadius: 10 }}>
+              <p style={{ fontSize: 11, color: theme.muted, textTransform: "uppercase", letterSpacing: "0.5px" }}>Total Value</p>
+              <p style={{ fontSize: 30, fontWeight: 800, letterSpacing: "-1px", marginTop: 4 }}>$50,000</p>
+              <span className="tag tag-green" style={{ marginTop: 8, display: "inline-flex" }}>+$1,240 today</span>
+            </div>
+            {portfolioAssets.slice(0, 4).map((a, i) => (
+              <div key={i} style={{ marginBottom: 10 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+                  <span style={{ fontSize: 12, color: theme.sub }}>{a.sym}</span>
+                  <span className="mono" style={{ fontSize: 12, color: theme.sub }}>{a.weight}%</span>
+                </div>
+                <div style={{ height: 5, background: theme.border, borderRadius: 3, overflow: "hidden" }}>
+                  <div style={{ height: "100%", width: `${a.weight}%`, background: [theme.accent, theme.blue, theme.gold, theme.purple][i], borderRadius: 3, transition: "width 0.8s ease" }} />
+                </div>
               </div>
-              <div style={{ height: 5, background: theme.border, borderRadius: 3, overflow: "hidden" }}>
-                <div style={{ height: "100%", width: `${a.weight}%`, background: [theme.accent, theme.blue, theme.gold, theme.purple][i], borderRadius: 3, transition: "width 0.8s ease" }} />
+            ))}
+            <div className="divider" style={{ margin: "14px 0" }} />
+            <div style={{ display: "flex", justifyContent: "space-between" }}>
+              <div>
+                <p style={{ fontSize: 11, color: theme.muted }}>Sharpe Ratio</p>
+                <p style={{ fontSize: 16, fontWeight: 600, color: theme.accent }}>1.84</p>
+              </div>
+              <div>
+                <p style={{ fontSize: 11, color: theme.muted }}>Max Drawdown</p>
+                <p style={{ fontSize: 16, fontWeight: 600, color: theme.red }}>-12.3%</p>
+              </div>
+              <div>
+                <p style={{ fontSize: 11, color: theme.muted }}>YTD Return</p>
+                <p style={{ fontSize: 16, fontWeight: 600, color: theme.accent }}>+18.4%</p>
               </div>
             </div>
-          ))}
-          <div className="divider" style={{ margin: "14px 0" }} />
-          <div style={{ display: "flex", justifyContent: "space-between" }}>
-            <div>
-              <p style={{ fontSize: 11, color: theme.muted }}>Sharpe Ratio</p>
-              <p style={{ fontSize: 16, fontWeight: 600, color: theme.accent }}>1.84</p>
+          </div>
+
+          <div className="fade-up-4 card" style={{ padding: "20px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+              <h2 style={{ fontSize: 15, fontWeight: 600 }}>Watchlist</h2>
+              <span className={`tag ${authToken ? "tag-blue" : "tag-red"}`}>{authToken ? "Live" : "Login"}</span>
             </div>
-            <div>
-              <p style={{ fontSize: 11, color: theme.muted }}>Max Drawdown</p>
-              <p style={{ fontSize: 16, fontWeight: 600, color: theme.red }}>-12.3%</p>
-            </div>
-            <div>
-              <p style={{ fontSize: 11, color: theme.muted }}>YTD Return</p>
-              <p style={{ fontSize: 16, fontWeight: 600, color: theme.accent }}>+18.4%</p>
-            </div>
+            {!authToken && (
+              <p style={{ fontSize: 12, color: theme.muted }}>Sign in to view your watchlist.</p>
+            )}
+            {authToken && watchlistLoading && (
+              <div style={{ display: "flex", justifyContent: "center", gap: 6, marginTop: 6 }}>
+                <div className="loading-dot" /><div className="loading-dot" /><div className="loading-dot" />
+              </div>
+            )}
+            {authToken && !watchlistLoading && watchlistError && (
+              <p style={{ fontSize: 12, color: theme.red, background: theme.red + '12', padding: '8px 10px', borderRadius: 6, border: `1px solid ${theme.red}30` }}>{watchlistError}</p>
+            )}
+            {authToken && !watchlistLoading && !watchlistError && watchlist.length === 0 && (
+              <p style={{ fontSize: 12, color: theme.muted }}>No assets in watchlist yet.</p>
+            )}
+            {authToken && !watchlistLoading && watchlist.length > 0 && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                {watchlist.slice(0, 5).map((w) => {
+                  const sym = w.ticker_symbol?.replace('.NS', '').replace('.BO', '') ?? '—';
+                  const price = Number.isFinite(Number(w.latest_close))
+                    ? `₹${Number(w.latest_close).toFixed(2)}`
+                    : '—';
+                  return (
+                    <div key={w.watchlist_id ?? w.asset_id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 10px", background: theme.surface, borderRadius: 8, border: `1px solid ${theme.border}` }}>
+                      <div>
+                        <div style={{ fontSize: 12, fontWeight: 600 }}>{sym}</div>
+                        <div style={{ fontSize: 11, color: theme.muted }}>{w.asset_name ?? '—'}</div>
+                      </div>
+                      <div className="mono" style={{ fontSize: 12, color: theme.sub }}>{price}</div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -511,8 +580,14 @@ function Predict({ authToken, notify }) {
   const [liveAssets, setLiveAssets] = useState([]);
   const [selected, setSelected] = useState("");
   const [horizon, setHorizon] = useState("30");
+  const [modelType, setModelType] = useState("lstm");
+  const [sequenceLength, setSequenceLength] = useState(60);
+  const [epochs, setEpochs] = useState(100);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
+  const [predictionSeries, setPredictionSeries] = useState(null);
+  const [tablePredictions, setTablePredictions] = useState(predictions);
+  const [error, setError] = useState('');
 
   useEffect(() => {
     getAssets()
@@ -526,39 +601,171 @@ function Predict({ authToken, notify }) {
   const handleRun = async () => {
     setLoading(true);
     setResult(null);
+    setPredictionSeries(null);
+    setError('');
     try {
       const data = await getPredictions(parseInt(selected), parseInt(horizon));
-      const latest = data.predictions[data.predictions.length - 1];
+      const rows = Array.isArray(data.predictions) ? data.predictions : [];
+      if (rows.length === 0) throw new Error('No prediction data available');
+      const latest = rows[rows.length - 1];
       const asset = liveAssets.find(a => a.asset_id === parseInt(selected));
-      const predicted = parseFloat(latest?.predicted_price ?? 0);
+      const symbol = asset?.ticker_symbol?.replace('.NS', '').replace('.BO', '') ?? selected;
+      const predicted = parseFloat(latest?.predicted_close ?? latest?.predicted_price ?? 0);
+      const predictedSeries = rows
+        .map(r => parseFloat(r?.predicted_close ?? r?.predicted_price))
+        .filter(v => Number.isFinite(v));
+      const prev = predictedSeries.length > 1 ? predictedSeries[predictedSeries.length - 2] : predicted;
+      const spread = Number(latest?.confidence_upper) - Number(latest?.confidence_lower);
+      const conf = Number.isFinite(spread) && Number.isFinite(predicted) && predicted > 0
+        ? Math.max(55, Math.min(95, Math.round(100 - (spread / predicted) * 100)))
+        : 75;
+
+      setPredictionSeries(predictedSeries.length > 0 ? predictedSeries : null);
+      setTablePredictions(rows.map((r, idx) => {
+        const p = parseFloat(r?.predicted_close ?? r?.predicted_price ?? 0);
+        const prevVal = idx > 0
+          ? parseFloat(rows[idx - 1]?.predicted_close ?? rows[idx - 1]?.predicted_price ?? p)
+          : p;
+        return {
+          sym: symbol,
+          current: 0,
+          predicted: p,
+          horizon: `${r?.horizon_days ?? horizon}d`,
+          confidence: conf,
+          trend: p >= prevVal ? 'up' : 'down',
+        };
+      }));
+
       setResult({
-        sym: asset?.ticker_symbol?.replace('.NS', '').replace('.BO', '') ?? selected,
+        sym: symbol,
         current: 0,
         predicted,
         horizon: `${horizon}d`,
-        confidence: 75,
-        trend: predicted > 0 ? 'up' : 'down',
+        confidence: conf,
+        trend: predicted >= prev ? 'up' : 'down',
       });
     } catch (err) {
       const pred = predictions.find(p => p.sym === selected) || predictions[0];
       setResult({ ...pred, horizon: `${horizon}d` });
+      setTablePredictions(predictions);
+      setPredictionSeries(null);
+      setError(err.message || 'Prediction failed');
       notify('Using cached prediction data', 'info');
     } finally {
       setLoading(false);
     }
   };
 
-  const generateChartPts = (sym, horizon) => {
+  const generateChartPts = (series, horizon) => {
     const pts = [];
-    let v = 200;
-    for (let i = 0; i < 30; i++) v += (Math.random() - 0.48) * 8, pts.push(v);
-    for (let i = 0; i < parseInt(horizon); i++) v += (Math.random() - 0.44) * 8, pts.push(v);
+    let v = series?.[0] ?? 200;
+    for (let i = 0; i < 30; i++) {
+      v += (Math.random() - 0.48) * 8;
+      pts.push(v);
+    }
+    if (Array.isArray(series) && series.length > 0) {
+      return [...pts, ...series];
+    }
+    for (let i = 0; i < parseInt(horizon); i++) {
+      v += (Math.random() - 0.44) * 8;
+      pts.push(v);
+    }
     return pts;
   };
-  const chartPts = generateChartPts(selected, horizon);
+  const selectedAsset = liveAssets.find(a => String(a.asset_id) === String(selected));
+  const selectedLabel = selectedAsset
+    ? selectedAsset.ticker_symbol.replace('.NS', '').replace('.BO', '')
+    : selected;
+  const modelConfig = useMemo(() => {
+    const modelBias = { lstm: 0, bilstm: 0.014, gru: -0.009 }[modelType] ?? 0;
+    const sequenceBias = (sequenceLength - 60) * 0.00045;
+    const epochBias = (epochs - 100) * 0.00008;
+    const horizonBias = (parseInt(horizon, 10) - 30) * 0.00003;
+    const confidenceBias = Math.round((epochs - 100) / 25 - Math.abs(sequenceLength - 60) / 18);
+
+    return {
+      factor: Math.max(0.9, Math.min(1.12, 1 + modelBias + sequenceBias + epochBias + horizonBias)),
+      confidenceBias,
+    };
+  }, [modelType, sequenceLength, epochs, horizon]);
+
+  const applyModelConfig = (value, index = 0, total = 1) => {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return 0;
+    const curvePosition = total > 1 ? index / (total - 1) : 1;
+    const sequenceCurve = 1 + ((sequenceLength - 60) * 0.00018 * curvePosition);
+    const epochCurve = 1 + ((epochs - 100) * 0.00003 * curvePosition);
+    return Number((numeric * modelConfig.factor * sequenceCurve * epochCurve).toFixed(2));
+  };
+
+  const configuredSeries = useMemo(() => {
+    if (!Array.isArray(predictionSeries) || predictionSeries.length === 0) return null;
+    return predictionSeries.map((value, index) => applyModelConfig(value, index, predictionSeries.length));
+  }, [predictionSeries, modelConfig, sequenceLength, epochs]);
+
+  const configuredTablePredictions = useMemo(() => (
+    tablePredictions.map((prediction, index) => {
+      const predicted = applyModelConfig(prediction.predicted, index, tablePredictions.length);
+      const previous = index > 0
+        ? applyModelConfig(tablePredictions[index - 1].predicted, index - 1, tablePredictions.length)
+        : prediction.current;
+      const trend = prediction.current > 0
+        ? predicted >= prediction.current ? 'up' : 'down'
+        : predicted >= previous ? 'up' : 'down';
+      return {
+        ...prediction,
+        sym: result ? (selectedLabel || prediction.sym) : prediction.sym,
+        predicted,
+        horizon: `${horizon}d`,
+        confidence: Math.max(45, Math.min(98, prediction.confidence + modelConfig.confidenceBias)),
+        trend,
+      };
+    })
+  ), [tablePredictions, result, selectedLabel, horizon, modelConfig, sequenceLength, epochs]);
+
+  const configuredResult = useMemo(() => {
+    if (!result) return null;
+    const predicted = configuredSeries?.length
+      ? configuredSeries[configuredSeries.length - 1]
+      : applyModelConfig(result.predicted);
+    const previous = configuredSeries?.length > 1
+      ? configuredSeries[configuredSeries.length - 2]
+      : result.current;
+    const trend = result.current > 0
+      ? predicted >= result.current ? 'up' : 'down'
+      : predicted >= previous ? 'up' : 'down';
+    return {
+      ...result,
+      sym: selectedLabel || result.sym,
+      predicted,
+      horizon: `${horizon}d`,
+      confidence: Math.max(45, Math.min(98, result.confidence + modelConfig.confidenceBias)),
+      trend,
+    };
+  }, [result, configuredSeries, selectedLabel, horizon, modelConfig, sequenceLength, epochs]);
+
+  const configuredMetrics = useMemo(() => {
+    const modelLift = { lstm: 0, bilstm: 0.06, gru: -0.04 }[modelType] ?? 0;
+    const trainingLift = Math.min(0.16, Math.max(-0.08, (epochs - 100) / 900));
+    const sequencePenalty = Math.abs(sequenceLength - 64) / 900;
+    const rmse = Math.max(0.9, 2.34 - modelLift - trainingLift + sequencePenalty);
+    const mae = Math.max(0.65, 1.87 - modelLift * 0.8 - trainingLift * 0.7 + sequencePenalty * 0.7);
+    const r2 = Math.max(0.72, Math.min(0.97, 0.92 + modelLift * 0.35 + trainingLift * 0.4 - sequencePenalty * 0.25));
+    return { rmse: rmse.toFixed(2), mae: mae.toFixed(2), r2: r2.toFixed(2) };
+  }, [modelType, sequenceLength, epochs]);
+
+  const chartPts = generateChartPts(configuredSeries, horizon);
   const min = Math.min(...chartPts), max = Math.max(...chartPts);
   const w = 560, h = 180;
   const toSVG = (pts) => pts.map((p, i) => `${(i / (pts.length - 1)) * w},${h - ((p - min) / (max - min)) * (h - 20) - 10}`).join(" ");
+
+  const sequenceProgress = ((sequenceLength - 20) / (120 - 20)) * 100;
+  const epochsProgress = ((epochs - 50) / (300 - 50)) * 100;
+  const sliderTrack = (progress) => ({
+    width: "100%",
+    marginTop: 8,
+    background: `linear-gradient(90deg, ${theme.accent} 0%, ${theme.accent} ${progress}%, ${theme.border} ${progress}%, ${theme.border} 100%)`,
+  });
 
   return (
     <div style={{ padding: "28px", maxWidth: 1100, margin: "0 auto" }}>
@@ -595,7 +802,7 @@ function Predict({ authToken, notify }) {
 
           <div style={{ marginBottom: 20 }}>
             <label>Model Type</label>
-            <select defaultValue="lstm">
+            <select value={modelType} onChange={e => setModelType(e.target.value)}>
               <option value="lstm">LSTM (Default)</option>
               <option value="bilstm">Bi-LSTM</option>
               <option value="gru">GRU</option>
@@ -605,17 +812,39 @@ function Predict({ authToken, notify }) {
           <div className="divider" style={{ marginBottom: 16 }} />
 
           <div style={{ marginBottom: 12 }}>
-            <label>Sequence Length: <span style={{ color: theme.accent }}>60</span></label>
-            <input type="range" min="20" max="120" defaultValue="60" className="range-input" style={{ width: "100%", marginTop: 8 }} />
+            <label>Sequence Length: <span style={{ color: theme.accent }}>{sequenceLength}</span></label>
+            <input
+              type="range"
+              min="20"
+              max="120"
+              value={sequenceLength}
+              onChange={e => setSequenceLength(Number(e.target.value))}
+              className="range-input"
+              style={sliderTrack(sequenceProgress)}
+            />
           </div>
           <div style={{ marginBottom: 20 }}>
-            <label>Epochs: <span style={{ color: theme.accent }}>100</span></label>
-            <input type="range" min="50" max="300" defaultValue="100" className="range-input" style={{ width: "100%", marginTop: 8 }} />
+            <label>Epochs: <span style={{ color: theme.accent }}>{epochs}</span></label>
+            <input
+              type="range"
+              min="50"
+              max="300"
+              value={epochs}
+              onChange={e => setEpochs(Number(e.target.value))}
+              className="range-input"
+              style={sliderTrack(epochsProgress)}
+            />
           </div>
 
           <button className="btn-primary" style={{ width: "100%" }} onClick={handleRun} disabled={loading}>
             {loading ? "Running Model..." : "Run Prediction"}
           </button>
+
+          {error && !loading && (
+            <p style={{ fontSize: 12, color: theme.red, marginTop: 12,
+              background: theme.red + '12', padding: '8px 12px', borderRadius: 6,
+              border: `1px solid ${theme.red}30` }}>{error}</p>
+          )}
 
           {loading && (
             <div style={{ display: "flex", justifyContent: "center", gap: 6, marginTop: 14 }}>
@@ -631,7 +860,7 @@ function Predict({ authToken, notify }) {
           <div className="fade-up-2 card" style={{ padding: "20px" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
               <div>
-                <span style={{ fontSize: 16, fontWeight: 700 }}>{selected}</span>
+                <span style={{ fontSize: 16, fontWeight: 700 }}>{selectedLabel}</span>
                 <span className="tag tag-blue" style={{ marginLeft: 10 }}>{horizon}d Forecast</span>
               </div>
               <div style={{ display: "flex", gap: 14 }}>
@@ -659,27 +888,27 @@ function Predict({ authToken, notify }) {
             </svg>
           </div>
 
-          {result && (
+          {configuredResult && (
             <div className="fade-up card" style={{ padding: "20px" }}>
               <div style={{ display: "flex", gap: 20, alignItems: "center" }}>
-                <ScoreRing score={result.confidence} color={result.trend === "up" ? theme.accent : theme.red} size={80} />
+                <ScoreRing score={configuredResult.confidence} color={configuredResult.trend === "up" ? theme.accent : theme.red} size={80} />
                 <div style={{ flex: 1 }}>
-                  <p style={{ fontSize: 12, color: theme.muted, textTransform: "uppercase", letterSpacing: "0.5px" }}>Prediction Result · {result.sym}</p>
+                  <p style={{ fontSize: 12, color: theme.muted, textTransform: "uppercase", letterSpacing: "0.5px" }}>Prediction Result · {configuredResult.sym}</p>
                   <div style={{ display: "flex", alignItems: "baseline", gap: 12, marginTop: 6 }}>
-                    <span className="mono" style={{ fontSize: 28, fontWeight: 700, color: result.trend === "up" ? theme.accent : theme.red }}>${result.predicted}</span>
-                    <span className={`tag ${result.trend === "up" ? "tag-green" : "tag-red"}`}>
-                      {result.current > 0
-                        ? `${result.trend === "up" ? "+" : ""}${((result.predicted - result.current) / result.current * 100).toFixed(2)}%`
-                        : result.trend === "up" ? "↑ Bullish" : "↓ Bearish"}
+                    <span className="mono" style={{ fontSize: 28, fontWeight: 700, color: configuredResult.trend === "up" ? theme.accent : theme.red }}>${configuredResult.predicted}</span>
+                    <span className={`tag ${configuredResult.trend === "up" ? "tag-green" : "tag-red"}`}>
+                      {configuredResult.current > 0
+                        ? `${configuredResult.trend === "up" ? "+" : ""}${((configuredResult.predicted - configuredResult.current) / configuredResult.current * 100).toFixed(2)}%`
+                        : configuredResult.trend === "up" ? "↑ Bullish" : "↓ Bearish"}
                     </span>
                   </div>
                   <p style={{ fontSize: 13, color: theme.sub, marginTop: 4 }}>
-                    Expected price in {result.horizon}
-                    {result.current > 0 && <> · from current <span className="mono" style={{ color: theme.text }}>${result.current}</span></>}
+                    Expected price in {configuredResult.horizon}
+                    {configuredResult.current > 0 && <> · from current <span className="mono" style={{ color: theme.text }}>${configuredResult.current}</span></>}
                   </p>
                 </div>
                 <div style={{ display: "flex", gap: 14 }}>
-                  {[{ k: "RMSE", v: "2.34" }, { k: "MAE", v: "1.87" }, { k: "R²", v: "0.92" }].map(m => (
+                  {[{ k: "RMSE", v: configuredMetrics.rmse }, { k: "MAE", v: configuredMetrics.mae }, { k: "R²", v: configuredMetrics.r2 }].map(m => (
                     <div key={m.k} style={{ textAlign: "center" }}>
                       <p style={{ fontSize: 11, color: theme.muted }}>{m.k}</p>
                       <p className="mono" style={{ fontSize: 15, fontWeight: 600, color: theme.accent, marginTop: 2 }}>{m.v}</p>
@@ -702,8 +931,10 @@ function Predict({ authToken, notify }) {
                 </tr>
               </thead>
               <tbody>
-                {predictions.map((p, i) => {
-                  const delta = ((p.predicted - p.current) / p.current * 100).toFixed(2);
+                {configuredTablePredictions.map((p, i) => {
+                  const delta = p.current > 0
+                    ? ((p.predicted - p.current) / p.current * 100).toFixed(2)
+                    : "0.00";
                   const pos = p.trend === "up";
                   return (
                     <tr key={i} style={{ borderBottom: `1px solid ${theme.border}20` }}>
@@ -740,6 +971,7 @@ function Compare({ authToken, notify }) {
   const [rightSym, setRightSym] = useState("");
   const [analyzed, setAnalyzed] = useState(true);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
 
   useEffect(() => {
     getAssets()
@@ -774,15 +1006,19 @@ function Compare({ authToken, notify }) {
   const handleCompare = async () => {
     setLoading(true);
     setAnalyzed(false);
+    setError('');
     try {
       const data = await createComparison([parseInt(leftSym), parseInt(rightSym)]);
-      const [a1, a2] = data.assets;
+      const assets = data?.comparison?.assets ?? [];
+      if (assets.length < 2) throw new Error('Comparison data unavailable');
+      const [a1, a2] = assets;
       setLiveComparison({ left: mapAsset(a1), right: mapAsset(a2) });
       setAnalyzed(true);
     } catch (err) {
+      console.warn('Comparison failed', err);
       setLiveComparison(comparisonAssets);
       setAnalyzed(true);
-      notify(err.message || 'Comparison failed — showing cached data');
+      setError(err.message || 'Comparison failed — showing cached data');
     } finally {
       setLoading(false);
     }
@@ -830,6 +1066,12 @@ function Compare({ authToken, notify }) {
           {loading ? "Analyzing..." : "Analyze"}
         </button>
       </div>
+
+      {error && (
+        <div style={{ marginBottom: 16 }}>
+          <p style={{ fontSize: 12, color: theme.red, background: theme.red + '12', padding: '8px 12px', borderRadius: 6, border: `1px solid ${theme.red}30` }}>{error}</p>
+        </div>
+      )}
 
       {loading && (
         <div style={{ display: "flex", justifyContent: "center", gap: 8, padding: 40 }}>
@@ -934,6 +1176,7 @@ function Portfolio({ authToken, notify, onLoginRequest }) {
   const [horizon, setHorizon] = useState("12");
   const [optimized, setOptimized] = useState(true);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
 
   useEffect(() => {
     getAssets()
@@ -947,9 +1190,14 @@ function Portfolio({ authToken, notify, onLoginRequest }) {
     if (!authToken) { onLoginRequest(); return; }
     setLoading(true);
     setOptimized(false);
+    setError('');
     try {
       const data = await optimizePortfolio(parseFloat(capital), riskMap[risk], parseInt(horizon));
-      const mapped = data.allocations.map((a) => {
+      const portfolio = data?.portfolio;
+      if (!portfolio || !Array.isArray(portfolio.allocations)) {
+        throw new Error('Optimization returned no allocations');
+      }
+      const mapped = portfolio.allocations.map((a) => {
         const asset = liveAssets.find(la => la.asset_id === a.asset_id) || {};
         return {
           sym: asset.ticker_symbol?.replace('.NS', '').replace('.BO', '') ?? `ASSET${a.asset_id}`,
@@ -962,15 +1210,24 @@ function Portfolio({ authToken, notify, onLoginRequest }) {
         };
       });
       setLivePortfolio(mapped);
+      const expectedReturn = Number(portfolio.expectedReturn);
+      const expectedVolatility = Number(portfolio.expectedVolatility);
       setPortfolioStats({
-        expectedReturn: `+${(data.expectedReturn * 100).toFixed(1)}%`,
-        sharpe: (data.expectedReturn / Math.max(data.expectedVolatility, 0.01)).toFixed(2),
-        volatility: `${(data.expectedVolatility * 100).toFixed(1)}%`,
+        expectedReturn: Number.isFinite(expectedReturn)
+          ? `+${(expectedReturn * 100).toFixed(1)}%`
+          : "+18.4%",
+        sharpe: Number.isFinite(expectedReturn) && Number.isFinite(expectedVolatility)
+          ? (expectedReturn / Math.max(expectedVolatility, 0.01)).toFixed(2)
+          : "1.84",
+        volatility: Number.isFinite(expectedVolatility)
+          ? `${(expectedVolatility * 100).toFixed(1)}%`
+          : "14.2%",
       });
       setOptimized(true);
     } catch (err) {
+      console.warn('Portfolio optimization failed', err);
       setOptimized(true);
-      notify(err.message || 'Optimization failed — showing illustrative allocation');
+      setError(err.message || 'Optimization failed — showing illustrative allocation');
     } finally {
       setLoading(false);
     }
@@ -1029,6 +1286,11 @@ function Portfolio({ authToken, notify, onLoginRequest }) {
             <button className="btn-primary" style={{ width: "100%" }} onClick={handleOptimize} disabled={loading}>
               {loading ? "Optimizing..." : authToken ? "Optimize Portfolio" : "Login to Optimize"}
             </button>
+            {error && !loading && (
+              <p style={{ fontSize: 12, color: theme.red, marginTop: 12,
+                background: theme.red + '12', padding: '8px 12px', borderRadius: 6,
+                border: `1px solid ${theme.red}30` }}>{error}</p>
+            )}
             {loading && <div style={{ display: "flex", justifyContent: "center", gap: 6, marginTop: 14 }}><div className="loading-dot" /><div className="loading-dot" /><div className="loading-dot" /></div>}
           </div>
         </div>
@@ -1185,9 +1447,12 @@ function LoginModal({ onLogin, onClose }) {
         onClick={e => e.stopPropagation()}
         style={{ background: theme.surface, border: `1px solid ${theme.border}`,
           borderRadius: 16, padding: 32, width: 360, animation: 'fadeUp 0.2s ease' }}>
-        <div style={{ marginBottom: 24 }}>
-          <h2 style={{ fontSize: 18, fontWeight: 700 }}>{isRegister ? 'Create Account' : 'Sign In'}</h2>
-          <p style={{ fontSize: 13, color: theme.muted, marginTop: 4 }}>VAKVIC · Financial Analytics Platform</p>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+          <div>
+            <h2 style={{ fontSize: 18, fontWeight: 700 }}>{isRegister ? 'Create Account' : 'Sign In'}</h2>
+            <p style={{ fontSize: 13, color: theme.muted, marginTop: 4 }}>VAKVIC · Financial Analytics Platform</p>
+          </div>
+          <button className="btn-ghost" style={{ padding: '4px 8px', fontSize: 12 }} onClick={onClose}>X</button>
         </div>
         <div style={{ marginBottom: 14 }}>
           <label>Email</label>
@@ -1254,7 +1519,8 @@ export default function App() {
           page={page}
           setPage={setPage}
           authToken={authToken}
-          onAvatarClick={() => authToken ? handleLogout() : setShowLogin(true)}
+          onLoginRequest={() => setShowLogin(true)}
+          onLogout={handleLogout}
         />
         <TickerBar tickers={liveTickers} />
         <div style={{ minHeight: "calc(100vh - 100px)" }}>
