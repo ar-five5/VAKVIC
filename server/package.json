@@ -1,0 +1,21 @@
+{
+  "name": "server",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "migrate": "node-pg-migrate -f database.json --config-value dev",
+    "migrate:up": "node-pg-migrate up -f database.json --config-value dev",
+    "migrate:down": "node-pg-migrate down -f database.json --config-value dev",
+    "migrate:create": "node-pg-migrate create"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "node-pg-migrate": "^8.0.4",
+    "pg": "^8.18.0"
+  }
+}

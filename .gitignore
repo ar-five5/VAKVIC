@@ -1,0 +1,25 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# Node
+server/node_modules/
+frontend/node_modules/
+backend/node_modules/
+backend/.env
+
+# Credentials (contains hardcoded DB password — never commit)
+server/database.json
+
+# Environment files with secrets
+database/.env
+
+# IDE / Claude
+.claude/
+.claude-helper.log
+
+# Misc
+nul
+*.log
