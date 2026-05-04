@@ -47,9 +47,20 @@ export const runPython = (script, args = []) => {
         ));
       }
       try {
-        const jsonStart = stdout.lastIndexOf('{');
-        const jsonStr = jsonStart >= 0 ? stdout.slice(jsonStart) : stdout;
-        resolve(JSON.parse(jsonStr));
+        const trimmed = stdout.trim();
+        const jsonStart = trimmed.search(/[\[{]/);
+        const jsonStr = jsonStart >= 0 ? trimmed.slice(jsonStart) : trimmed;
+        try {
+          resolve(JSON.parse(jsonStr));
+        } catch (err) {
+          const lastBrace = Math.max(jsonStr.lastIndexOf('}'), jsonStr.lastIndexOf(']'));
+          if (lastBrace >= 0) {
+            const clipped = jsonStr.slice(0, lastBrace + 1);
+            resolve(JSON.parse(clipped));
+            return;
+          }
+          throw err;
+        }
       } catch {
         reject(new Error(`Failed to parse JSON from ${script}: ${stdout}`));
       }

@@ -46,10 +46,14 @@ export async function getPortfolioHistory(userId) {
 export async function getPortfolioById(portfolioId) {
   const { rows } = await query(
     `SELECT p.*,
-       (SELECT json_agg(pa ORDER BY pa.id)
-        FROM portfolio_assets pa
-        WHERE pa.portfolio_id = p.portfolio_id) AS assets
+       COALESCE(pa.allocations, '[]'::json) AS allocations,
+       COALESCE(pa.allocations, '[]'::json) AS assets
      FROM portfolios p
+     LEFT JOIN LATERAL (
+       SELECT json_agg(pa ORDER BY pa.id) AS allocations
+       FROM portfolio_assets pa
+       WHERE pa.portfolio_id = p.portfolio_id
+     ) pa ON true
      WHERE p.portfolio_id = $1`,
     [portfolioId]
   );
