@@ -1,4 +1,9 @@
 import { useState, useEffect, useRef } from "react";
+import * as authApi from './api/auth.js';
+import { getAssets } from './api/assets.js';
+import { getPredictions } from './api/predictions.js';
+import { createComparison } from './api/comparisons.js';
+import { optimizePortfolio } from './api/portfolio.js';
 
 const theme = {
   bg: "#07080A",
@@ -313,8 +318,8 @@ function ScoreRing({ score, size = 80, color = theme.accent }) {
 }
 
 // ─── Ticker Bar ───────────────────────────────────────────────────────────────
-function TickerBar() {
-  const doubled = [...tickerData, ...tickerData];
+function TickerBar({ tickers = tickerData }) {
+  const doubled = [...tickers, ...tickers];
   return (
     <div style={{ background: theme.surface, borderBottom: `1px solid ${theme.border}`, padding: "8px 0", overflow: "hidden" }}>
       <div className="ticker-inner" style={{ display: "inline-flex", gap: 48, animation: "ticker 30s linear infinite" }}>
@@ -331,7 +336,7 @@ function TickerBar() {
 }
 
 // ─── Navbar ───────────────────────────────────────────────────────────────────
-function Navbar({ page, setPage }) {
+function Navbar({ page, setPage, authToken, onAvatarClick }) {
   const nav = ["Dashboard", "Predict", "Compare", "Portfolio"];
   return (
     <nav style={{ background: `${theme.bg}E0`, backdropFilter: "blur(16px)", borderBottom: `1px solid ${theme.border}`, padding: "0 28px", display: "flex", alignItems: "center", gap: 8, height: 56, position: "sticky", top: 0, zIndex: 100 }}>
@@ -350,14 +355,25 @@ function Navbar({ page, setPage }) {
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
         <div style={{ width: 8, height: 8, borderRadius: "50%", background: theme.accent, animation: "pulse 2s infinite" }} />
         <span style={{ fontSize: 12, color: theme.sub, fontFamily: "'DM Mono', monospace" }}>LIVE</span>
-        <div style={{ width: 32, height: 32, borderRadius: "50%", background: `linear-gradient(135deg, ${theme.purple}, ${theme.blue})`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>A</div>
+        <div
+          onClick={onAvatarClick}
+          title={authToken ? "Click to logout" : "Click to login"}
+          style={{ width: 32, height: 32, borderRadius: "50%",
+            background: authToken
+              ? `linear-gradient(135deg, ${theme.accent}, ${theme.blue})`
+              : `linear-gradient(135deg, ${theme.purple}, ${theme.blue})`,
+            display: "flex", alignItems: "center", justifyContent: "center",
+            fontSize: 12, fontWeight: 600, cursor: "pointer",
+            border: authToken ? `2px solid ${theme.accent}60` : "none" }}>
+          {authToken ? "✓" : "A"}
+        </div>
       </div>
     </nav>
   );
 }
 
 // ─── DASHBOARD PAGE ───────────────────────────────────────────────────────────
-function Dashboard({ setPage }) {
+function Dashboard({ setPage, setTickers, authToken, notify }) {
   const marketData = [
     { label: "S&P 500", val: "5,248.32", change: "+0.34%", pos: true, data: [40, 38, 45, 42, 50, 48, 55, 52, 60, 58, 65, 63] },
     { label: "NASDAQ", val: "16,421.10", change: "+0.61%", pos: true, data: [35, 40, 38, 45, 43, 50, 48, 55, 53, 58, 56, 62] },
@@ -365,6 +381,19 @@ function Dashboard({ setPage }) {
     { label: "Gold", val: "$2,341", change: "-0.15%", pos: false, data: [60, 58, 55, 57, 54, 52, 55, 53, 51, 53, 50, 49] },
   ];
   const recentPreds = predictions.slice(0, 3);
+
+  useEffect(() => {
+    getAssets()
+      .then(({ assets }) => {
+        setTickers(assets.map(a => ({
+          sym: a.ticker_symbol.replace('.NS', '').replace('.BO', ''),
+          price: '—',
+          change: '+0.00%',
+        })));
+      })
+      .catch(() => {}); // keep mock tickers on error
+  }, []);
+
   return (
     <div style={{ padding: "28px 28px", maxWidth: 1200, margin: "0 auto" }}>
       {/* Header */}
@@ -445,7 +474,6 @@ function Dashboard({ setPage }) {
             <p style={{ fontSize: 30, fontWeight: 800, letterSpacing: "-1px", marginTop: 4 }}>$50,000</p>
             <span className="tag tag-green" style={{ marginTop: 8, display: "inline-flex" }}>+$1,240 today</span>
           </div>
-          {/* Allocation Bars */}
           {portfolioAssets.slice(0, 4).map((a, i) => (
             <div key={i} style={{ marginBottom: 10 }}>
               <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
@@ -479,20 +507,45 @@ function Dashboard({ setPage }) {
 }
 
 // ─── PREDICT PAGE ─────────────────────────────────────────────────────────────
-function Predict() {
-  const [selected, setSelected] = useState("AAPL");
+function Predict({ authToken, notify }) {
+  const [liveAssets, setLiveAssets] = useState([]);
+  const [selected, setSelected] = useState("");
   const [horizon, setHorizon] = useState("30");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
 
-  const handleRun = () => {
+  useEffect(() => {
+    getAssets()
+      .then(({ assets }) => {
+        setLiveAssets(assets);
+        if (assets.length > 0) setSelected(String(assets[0].asset_id));
+      })
+      .catch(() => {}); // dropdowns remain hidden, run button uses fallback
+  }, []);
+
+  const handleRun = async () => {
     setLoading(true);
     setResult(null);
-    setTimeout(() => {
+    try {
+      const data = await getPredictions(parseInt(selected), parseInt(horizon));
+      const latest = data.predictions[data.predictions.length - 1];
+      const asset = liveAssets.find(a => a.asset_id === parseInt(selected));
+      const predicted = parseFloat(latest?.predicted_price ?? 0);
+      setResult({
+        sym: asset?.ticker_symbol?.replace('.NS', '').replace('.BO', '') ?? selected,
+        current: 0,
+        predicted,
+        horizon: `${horizon}d`,
+        confidence: 75,
+        trend: predicted > 0 ? 'up' : 'down',
+      });
+    } catch (err) {
       const pred = predictions.find(p => p.sym === selected) || predictions[0];
       setResult({ ...pred, horizon: `${horizon}d` });
+      notify('Using cached prediction data', 'info');
+    } finally {
       setLoading(false);
-    }, 1800);
+    }
   };
 
   const generateChartPts = (sym, horizon) => {
@@ -522,14 +575,21 @@ function Predict() {
           <div style={{ marginBottom: 16 }}>
             <label>Asset Symbol</label>
             <select value={selected} onChange={e => setSelected(e.target.value)}>
-              {["AAPL", "NVDA", "TSLA", "GOOGL", "MSFT", "AMZN", "BTC-USD", "ETH-USD"].map(s => <option key={s}>{s}</option>)}
+              {liveAssets.length > 0
+                ? liveAssets.map(a => (
+                    <option key={a.asset_id} value={a.asset_id}>
+                      {a.ticker_symbol.replace('.NS', '').replace('.BO', '')}
+                    </option>
+                  ))
+                : ["AAPL", "NVDA", "TSLA", "GOOGL", "MSFT", "AMZN", "BTC-USD", "ETH-USD"].map(s => <option key={s}>{s}</option>)
+              }
             </select>
           </div>
 
           <div style={{ marginBottom: 16 }}>
             <label>Prediction Horizon</label>
             <select value={horizon} onChange={e => setHorizon(e.target.value)}>
-              {["7", "14", "30", "60", "90"].map(d => <option key={d} value={d}>{d} Days</option>)}
+              {["7", "14", "30", "90"].map(d => <option key={d} value={d}>{d} Days</option>)}
             </select>
           </div>
 
@@ -590,13 +650,10 @@ function Predict() {
                   <stop offset="100%" stopColor={theme.blue} stopOpacity="0" />
                 </linearGradient>
               </defs>
-              {/* Historical area */}
               <polygon fill="url(#chartGrad)" points={`0,${h + 10} ${toSVG(chartPts.slice(0, 30))} ${(29 / (chartPts.length - 1)) * w},${h + 10}`} />
               <polyline fill="none" stroke={theme.accent} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" points={toSVG(chartPts.slice(0, 30))} />
-              {/* Predicted area */}
               <polygon fill="url(#predGrad)" points={`${(29 / (chartPts.length - 1)) * w},${h + 10} ${toSVG(chartPts.slice(29))} ${w},${h + 10}`} />
               <polyline fill="none" stroke={theme.blue} strokeWidth="2" strokeDasharray="6,4" strokeLinecap="round" strokeLinejoin="round" points={toSVG(chartPts.slice(29))} />
-              {/* Divider */}
               <line x1={(29 / (chartPts.length - 1)) * w} y1={10} x2={(29 / (chartPts.length - 1)) * w} y2={h + 10} stroke={theme.border} strokeWidth="1.5" strokeDasharray="4,3" />
               <text x={(29 / (chartPts.length - 1)) * w + 5} y={20} fill={theme.muted} fontSize="10" fontFamily="DM Mono, monospace">NOW</text>
             </svg>
@@ -611,11 +668,14 @@ function Predict() {
                   <div style={{ display: "flex", alignItems: "baseline", gap: 12, marginTop: 6 }}>
                     <span className="mono" style={{ fontSize: 28, fontWeight: 700, color: result.trend === "up" ? theme.accent : theme.red }}>${result.predicted}</span>
                     <span className={`tag ${result.trend === "up" ? "tag-green" : "tag-red"}`}>
-                      {result.trend === "up" ? "+" : ""}{((result.predicted - result.current) / result.current * 100).toFixed(2)}%
+                      {result.current > 0
+                        ? `${result.trend === "up" ? "+" : ""}${((result.predicted - result.current) / result.current * 100).toFixed(2)}%`
+                        : result.trend === "up" ? "↑ Bullish" : "↓ Bearish"}
                     </span>
                   </div>
                   <p style={{ fontSize: 13, color: theme.sub, marginTop: 4 }}>
-                    Expected price in {result.horizon} · from current <span className="mono" style={{ color: theme.text }}>${result.current}</span>
+                    Expected price in {result.horizon}
+                    {result.current > 0 && <> · from current <span className="mono" style={{ color: theme.text }}>${result.current}</span></>}
                   </p>
                 </div>
                 <div style={{ display: "flex", gap: 14 }}>
@@ -673,22 +733,68 @@ function Predict() {
 }
 
 // ─── COMPARE PAGE ─────────────────────────────────────────────────────────────
-function Compare() {
-  const [leftSym, setLeftSym] = useState("AAPL");
-  const [rightSym, setRightSym] = useState("MSFT");
+function Compare({ authToken, notify }) {
+  const [liveAssets, setLiveAssets] = useState([]);
+  const [liveComparison, setLiveComparison] = useState(comparisonAssets);
+  const [leftSym, setLeftSym] = useState("");
+  const [rightSym, setRightSym] = useState("");
   const [analyzed, setAnalyzed] = useState(true);
   const [loading, setLoading] = useState(false);
 
+  useEffect(() => {
+    getAssets()
+      .then(({ assets }) => {
+        setLiveAssets(assets);
+        if (assets.length > 0) setLeftSym(String(assets[0].asset_id));
+        if (assets.length > 1) setRightSym(String(assets[1].asset_id));
+      })
+      .catch(() => {}); // keep mock dropdowns on error
+  }, []);
+
   const metricsLabels = { volatility: "Volatility Score", momentum: "Momentum", value: "Value Score", growth: "Growth", quality: "Quality" };
-  const L = comparisonAssets.left;
-  const R = comparisonAssets.right;
+  const L = liveComparison.left;
+  const R = liveComparison.right;
   const winner = L.score > R.score ? L.sym : R.sym;
 
-  const handleCompare = () => {
+  const mapAsset = (a) => ({
+    sym: a.ticker?.replace('.NS', '').replace('.BO', '') ?? '',
+    name: a.name ?? '',
+    price: '—',
+    type: 'Stock',
+    score: Math.round(a.suitabilityScore ?? 50),
+    metrics: {
+      volatility: Math.min(100, Math.round(Math.abs((a.metrics?.volatility ?? 0.5) * 100))),
+      momentum:   Math.min(100, Math.max(0, Math.round((a.metrics?.trend_strength ?? 0.5) * 100))),
+      value:      Math.min(100, Math.max(0, Math.round(100 + (a.metrics?.max_drawdown ?? -0.5) * 100))),
+      growth:     50,
+      quality:    Math.min(100, Math.max(0, Math.round((a.metrics?.sharpe_ratio ?? 1) * 30))),
+    },
+  });
+
+  const handleCompare = async () => {
     setLoading(true);
     setAnalyzed(false);
-    setTimeout(() => { setLoading(false); setAnalyzed(true); }, 1400);
+    try {
+      const data = await createComparison([parseInt(leftSym), parseInt(rightSym)]);
+      const [a1, a2] = data.assets;
+      setLiveComparison({ left: mapAsset(a1), right: mapAsset(a2) });
+      setAnalyzed(true);
+    } catch (err) {
+      setLiveComparison(comparisonAssets);
+      setAnalyzed(true);
+      notify(err.message || 'Comparison failed — showing cached data');
+    } finally {
+      setLoading(false);
+    }
   };
+
+  const assetOptions = liveAssets.length > 0
+    ? liveAssets.map(a => (
+        <option key={a.asset_id} value={a.asset_id}>
+          {a.ticker_symbol.replace('.NS', '').replace('.BO', '')}
+        </option>
+      ))
+    : null;
 
   return (
     <div style={{ padding: "28px", maxWidth: 1100, margin: "0 auto" }}>
@@ -702,14 +808,14 @@ function Compare() {
         <div style={{ flex: 1 }}>
           <label>Asset A</label>
           <select value={leftSym} onChange={e => setLeftSym(e.target.value)}>
-            {["AAPL", "NVDA", "TSLA", "GOOGL", "MSFT", "AMZN", "SPY", "BTC-USD"].map(s => <option key={s}>{s}</option>)}
+            {assetOptions || ["AAPL", "NVDA", "TSLA", "GOOGL", "MSFT", "AMZN", "SPY", "BTC-USD"].map(s => <option key={s}>{s}</option>)}
           </select>
         </div>
         <div style={{ padding: "10px 16px", background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: 8, color: theme.muted, fontSize: 13 }}>VS</div>
         <div style={{ flex: 1 }}>
           <label>Asset B</label>
           <select value={rightSym} onChange={e => setRightSym(e.target.value)}>
-            {["MSFT", "AAPL", "NVDA", "TSLA", "GOOGL", "AMZN", "SPY", "BTC-USD"].map(s => <option key={s}>{s}</option>)}
+            {assetOptions || ["MSFT", "AAPL", "NVDA", "TSLA", "GOOGL", "AMZN", "SPY", "BTC-USD"].map(s => <option key={s}>{s}</option>)}
           </select>
         </div>
         <div>
@@ -720,7 +826,7 @@ function Compare() {
             <option value="aggressive">Aggressive</option>
           </select>
         </div>
-        <button className="btn-primary" onClick={handleCompare} disabled={loading} style={{ padding: "10px 28px", flexShrink: 0 }}>
+        <button className="btn-primary" onClick={handleCompare} disabled={loading || (!leftSym || !rightSym)} style={{ padding: "10px 28px", flexShrink: 0 }}>
           {loading ? "Analyzing..." : "Analyze"}
         </button>
       </div>
@@ -733,7 +839,6 @@ function Compare() {
 
       {analyzed && (
         <div style={{ display: "grid", gridTemplateColumns: "1fr auto 1fr", gap: 16, alignItems: "start" }}>
-          {/* Left Card */}
           {[L, R].map((asset, side) => (
             <div key={side} className={`fade-up-${side + 1} card`} style={{ padding: "22px", border: asset.sym === winner ? `1px solid ${theme.accent}60` : undefined }}>
               {asset.sym === winner && (
@@ -820,19 +925,58 @@ function Compare() {
 }
 
 // ─── PORTFOLIO PAGE ───────────────────────────────────────────────────────────
-function Portfolio() {
+function Portfolio({ authToken, notify, onLoginRequest }) {
+  const [liveAssets, setLiveAssets] = useState([]);
+  const [livePortfolio, setLivePortfolio] = useState(null);
+  const [portfolioStats, setPortfolioStats] = useState(null);
   const [capital, setCapital] = useState("50000");
   const [risk, setRisk] = useState("moderate");
   const [horizon, setHorizon] = useState("12");
   const [optimized, setOptimized] = useState(true);
   const [loading, setLoading] = useState(false);
 
-  const handleOptimize = () => {
+  useEffect(() => {
+    getAssets()
+      .then(({ assets }) => setLiveAssets(assets))
+      .catch(() => {});
+  }, []);
+
+  const riskMap = { conservative: 'Low', moderate: 'Medium', aggressive: 'High' };
+
+  const handleOptimize = async () => {
+    if (!authToken) { onLoginRequest(); return; }
     setLoading(true);
     setOptimized(false);
-    setTimeout(() => { setLoading(false); setOptimized(true); }, 2000);
+    try {
+      const data = await optimizePortfolio(parseFloat(capital), riskMap[risk], parseInt(horizon));
+      const mapped = data.allocations.map((a) => {
+        const asset = liveAssets.find(la => la.asset_id === a.asset_id) || {};
+        return {
+          sym: asset.ticker_symbol?.replace('.NS', '').replace('.BO', '') ?? `ASSET${a.asset_id}`,
+          name: asset.asset_name ?? '—',
+          type: asset.asset_class === 'equity' ? 'Stock' : asset.asset_class ?? 'Stock',
+          weight: Math.round(a.allocation_pct),
+          value: Math.round(a.amount_inr),
+          change: '+0.00%',
+          pos: true,
+        };
+      });
+      setLivePortfolio(mapped);
+      setPortfolioStats({
+        expectedReturn: `+${(data.expectedReturn * 100).toFixed(1)}%`,
+        sharpe: (data.expectedReturn / Math.max(data.expectedVolatility, 0.01)).toFixed(2),
+        volatility: `${(data.expectedVolatility * 100).toFixed(1)}%`,
+      });
+      setOptimized(true);
+    } catch (err) {
+      setOptimized(true);
+      notify(err.message || 'Optimization failed — showing illustrative allocation');
+    } finally {
+      setLoading(false);
+    }
   };
 
+  const displayAssets = livePortfolio ?? portfolioAssets;
   const colors = [theme.accent, theme.blue, theme.gold, theme.purple, theme.red, "#F97316"];
 
   return (
@@ -848,8 +992,8 @@ function Portfolio() {
           <div className="fade-up-1 card" style={{ padding: "20px" }}>
             <h3 style={{ fontSize: 13, color: theme.sub, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 18 }}>Investor Profile</h3>
             <div style={{ marginBottom: 16 }}>
-              <label>Capital (USD)</label>
-              <input type="number" value={capital} onChange={e => setCapital(e.target.value)} placeholder="50000" />
+              <label>Capital (INR)</label>
+              <input type="number" value={capital} onChange={e => setCapital(e.target.value)} placeholder="500000" />
             </div>
             <div style={{ marginBottom: 16 }}>
               <label>Risk Tolerance</label>
@@ -883,7 +1027,7 @@ function Portfolio() {
               </select>
             </div>
             <button className="btn-primary" style={{ width: "100%" }} onClick={handleOptimize} disabled={loading}>
-              {loading ? "Optimizing..." : "Optimize Portfolio"}
+              {loading ? "Optimizing..." : authToken ? "Optimize Portfolio" : "Login to Optimize"}
             </button>
             {loading && <div style={{ display: "flex", justifyContent: "center", gap: 6, marginTop: 14 }}><div className="loading-dot" /><div className="loading-dot" /><div className="loading-dot" /></div>}
           </div>
@@ -895,10 +1039,10 @@ function Portfolio() {
             {/* Stats */}
             <div className="fade-up-1" style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12 }}>
               {[
-                { label: "Expected Return", val: "+18.4%", color: theme.accent },
-                { label: "Sharpe Ratio", val: "1.84", color: theme.blue },
+                { label: "Expected Return", val: portfolioStats?.expectedReturn ?? "+18.4%", color: theme.accent },
+                { label: "Sharpe Ratio", val: portfolioStats?.sharpe ?? "1.84", color: theme.blue },
                 { label: "Max Drawdown", val: "-12.3%", color: theme.red },
-                { label: "Volatility", val: "14.2%", color: theme.gold },
+                { label: "Volatility", val: portfolioStats?.volatility ?? "14.2%", color: theme.gold },
               ].map((s, i) => (
                 <div key={i} className="card" style={{ padding: "16px", textAlign: "center" }}>
                   <p style={{ fontSize: 11, color: theme.muted, textTransform: "uppercase", letterSpacing: "0.4px" }}>{s.label}</p>
@@ -911,19 +1055,19 @@ function Portfolio() {
             <div className="fade-up-2 card" style={{ padding: "20px" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
                 <h3 style={{ fontSize: 15, fontWeight: 600 }}>Recommended Allocation</h3>
-                <span className="tag tag-gold">Optimized</span>
+                <span className="tag tag-gold">{livePortfolio ? "Live" : "Illustrative"}</span>
               </div>
               {/* Stacked bar */}
               <div style={{ height: 18, display: "flex", borderRadius: 8, overflow: "hidden", marginBottom: 16 }}>
-                {portfolioAssets.map((a, i) => (
-                  <div key={i} style={{ flex: a.weight, background: colors[i], transition: "flex 0.8s ease" }} title={`${a.sym}: ${a.weight}%`} />
+                {displayAssets.map((a, i) => (
+                  <div key={i} style={{ flex: a.weight, background: colors[i % colors.length], transition: "flex 0.8s ease" }} title={`${a.sym}: ${a.weight}%`} />
                 ))}
               </div>
               {/* Legend */}
               <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 20 }}>
-                {portfolioAssets.map((a, i) => (
+                {displayAssets.map((a, i) => (
                   <div key={i} style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                    <div style={{ width: 10, height: 10, borderRadius: 2, background: colors[i] }} />
+                    <div style={{ width: 10, height: 10, borderRadius: 2, background: colors[i % colors.length] }} />
                     <span style={{ fontSize: 11, color: theme.sub }}>{a.sym} {a.weight}%</span>
                   </div>
                 ))}
@@ -939,12 +1083,12 @@ function Portfolio() {
                   </tr>
                 </thead>
                 <tbody>
-                  {portfolioAssets.map((a, i) => (
+                  {displayAssets.map((a, i) => (
                     <tr key={i} style={{ borderBottom: `1px solid ${theme.border}20` }}>
                       <td style={{ padding: "11px 10px" }}>
                         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                          <div style={{ width: 28, height: 28, borderRadius: 6, background: colors[i] + "25", display: "flex", alignItems: "center", justifyContent: "center", border: `1px solid ${colors[i]}40` }}>
-                            <span style={{ fontSize: 10, fontWeight: 700, color: colors[i] }}>{a.sym.slice(0, 2)}</span>
+                          <div style={{ width: 28, height: 28, borderRadius: 6, background: colors[i % colors.length] + "25", display: "flex", alignItems: "center", justifyContent: "center", border: `1px solid ${colors[i % colors.length]}40` }}>
+                            <span style={{ fontSize: 10, fontWeight: 700, color: colors[i % colors.length] }}>{a.sym.slice(0, 2)}</span>
                           </div>
                           <div>
                             <div style={{ fontWeight: 600, fontSize: 13 }}>{a.sym}</div>
@@ -958,12 +1102,14 @@ function Portfolio() {
                       <td style={{ padding: "11px 10px" }}>
                         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                           <div style={{ width: 70, height: 5, background: theme.border, borderRadius: 3 }}>
-                            <div style={{ width: `${(a.weight / 30) * 100}%`, height: "100%", background: colors[i], borderRadius: 3 }} />
+                            <div style={{ width: `${(a.weight / 30) * 100}%`, height: "100%", background: colors[i % colors.length], borderRadius: 3 }} />
                           </div>
                           <span className="mono" style={{ fontSize: 12, color: theme.sub }}>{a.weight}%</span>
                         </div>
                       </td>
-                      <td className="mono" style={{ padding: "11px 10px", fontSize: 13 }}>${a.value.toLocaleString()}</td>
+                      <td className="mono" style={{ padding: "11px 10px", fontSize: 13 }}>
+                        {typeof a.value === 'number' ? `₹${a.value.toLocaleString()}` : `$${a.value.toLocaleString()}`}
+                      </td>
                       <td style={{ padding: "11px 10px" }}>
                         <span className={`tag ${a.pos ? "tag-green" : "tag-red"}`}>{a.change}</span>
                       </td>
@@ -986,18 +1132,14 @@ function Portfolio() {
                     <stop offset="100%" stopColor={theme.accent} />
                   </linearGradient>
                 </defs>
-                {/* Axes */}
                 <line x1="40" y1="150" x2="480" y2="150" stroke={theme.border} strokeWidth="1" />
                 <line x1="40" y1="10" x2="40" y2="150" stroke={theme.border} strokeWidth="1" />
                 <text x="260" y="170" textAnchor="middle" fill={theme.muted} fontSize="11" fontFamily="DM Mono, monospace">Volatility (Risk)</text>
                 <text x="18" y="80" textAnchor="middle" fill={theme.muted} fontSize="11" fontFamily="DM Mono, monospace" transform="rotate(-90, 18, 80)">Return</text>
-                {/* Frontier curve */}
                 <path d="M 80 140 Q 120 80 180 60 Q 240 40 320 30 Q 380 22 440 20" fill="none" stroke="url(#frontierGrad)" strokeWidth="2.5" strokeLinecap="round" />
-                {/* Scatter points */}
                 {[[120, 100], [180, 80], [220, 65], [280, 50], [350, 40], [400, 55], [430, 75]].map(([x, y], i) => (
                   <circle key={i} cx={x} cy={y} r={4} fill={theme.surface} stroke={theme.muted} strokeWidth="1.5" />
                 ))}
-                {/* Current portfolio marker */}
                 <circle cx={280} cy={50} r={7} fill={theme.accent} />
                 <text x={290} y={46} fill={theme.accent} fontSize="10" fontFamily="DM Mono, monospace">Current</text>
               </svg>
@@ -1009,26 +1151,145 @@ function Portfolio() {
   );
 }
 
+// ─── LOGIN MODAL ──────────────────────────────────────────────────────────────
+function LoginModal({ onLogin, onClose }) {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [isRegister, setIsRegister] = useState(false);
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async () => {
+    if (!email || !password) { setError('Email and password required'); return; }
+    setLoading(true);
+    setError('');
+    try {
+      const fn = isRegister ? authApi.register : authApi.login;
+      const data = await fn(email, password);
+      onLogin(data.token, data.user);
+    } catch (err) {
+      setError(err.message || 'Authentication failed');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleKey = (e) => { if (e.key === 'Enter') handleSubmit(); };
+
+  return (
+    <div
+      onClick={onClose}
+      style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 200,
+        display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{ background: theme.surface, border: `1px solid ${theme.border}`,
+          borderRadius: 16, padding: 32, width: 360, animation: 'fadeUp 0.2s ease' }}>
+        <div style={{ marginBottom: 24 }}>
+          <h2 style={{ fontSize: 18, fontWeight: 700 }}>{isRegister ? 'Create Account' : 'Sign In'}</h2>
+          <p style={{ fontSize: 13, color: theme.muted, marginTop: 4 }}>VAKVIC · Financial Analytics Platform</p>
+        </div>
+        <div style={{ marginBottom: 14 }}>
+          <label>Email</label>
+          <input type="email" value={email} onChange={e => setEmail(e.target.value)}
+            onKeyDown={handleKey} placeholder="you@example.com" autoFocus />
+        </div>
+        <div style={{ marginBottom: 20 }}>
+          <label>Password</label>
+          <input type="password" value={password} onChange={e => setPassword(e.target.value)}
+            onKeyDown={handleKey} placeholder="••••••••" />
+        </div>
+        {error && (
+          <p style={{ fontSize: 12, color: theme.red, marginBottom: 16,
+            background: theme.red + '12', padding: '8px 12px', borderRadius: 6,
+            border: `1px solid ${theme.red}30` }}>{error}</p>
+        )}
+        <button className="btn-primary" style={{ width: '100%', marginBottom: 12 }}
+          onClick={handleSubmit} disabled={loading}>
+          {loading ? 'Please wait...' : isRegister ? 'Create Account' : 'Sign In'}
+        </button>
+        <button className="btn-ghost" style={{ width: '100%', fontSize: 13 }}
+          onClick={() => { setIsRegister(r => !r); setError(''); }}>
+          {isRegister ? 'Already have an account? Sign in' : "Don't have an account? Register"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ─── APP ──────────────────────────────────────────────────────────────────────
 export default function App() {
   const [page, setPage] = useState("Dashboard");
+  const [authToken, setAuthToken] = useState(localStorage.getItem('vakvic_token') || null);
+  const [currentUser, setCurrentUser] = useState(null);
+  const [showLogin, setShowLogin] = useState(false);
+  const [notification, setNotification] = useState(null);
+  const [liveTickers, setLiveTickers] = useState(tickerData);
+
+  const notify = (message, type = 'error') => {
+    setNotification({ message, type });
+    setTimeout(() => setNotification(null), 4000);
+  };
+
+  const handleLogin = (token, user) => {
+    localStorage.setItem('vakvic_token', token);
+    setAuthToken(token);
+    setCurrentUser(user);
+    setShowLogin(false);
+    notify('Signed in successfully', 'success');
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem('vakvic_token');
+    setAuthToken(null);
+    setCurrentUser(null);
+    notify('Signed out', 'success');
+  };
+
   return (
     <>
       <style>{styles}</style>
       <div style={{ minHeight: "100vh", background: theme.bg }}>
-        <Navbar page={page} setPage={setPage} />
-        <TickerBar />
+        <Navbar
+          page={page}
+          setPage={setPage}
+          authToken={authToken}
+          onAvatarClick={() => authToken ? handleLogout() : setShowLogin(true)}
+        />
+        <TickerBar tickers={liveTickers} />
         <div style={{ minHeight: "calc(100vh - 100px)" }}>
-          {page === "Dashboard" && <Dashboard setPage={setPage} />}
-          {page === "Predict" && <Predict />}
-          {page === "Compare" && <Compare />}
-          {page === "Portfolio" && <Portfolio />}
+          {page === "Dashboard" && <Dashboard setPage={setPage} setTickers={setLiveTickers} authToken={authToken} notify={notify} />}
+          {page === "Predict" && <Predict authToken={authToken} notify={notify} />}
+          {page === "Compare" && <Compare authToken={authToken} notify={notify} />}
+          {page === "Portfolio" && <Portfolio authToken={authToken} notify={notify} onLoginRequest={() => setShowLogin(true)} />}
         </div>
         <footer style={{ borderTop: `1px solid ${theme.border}`, padding: "16px 28px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <span style={{ fontSize: 12, color: theme.muted, fontFamily: "'DM Mono', monospace" }}>VAKVIC · Value Analytics & Knowledge-driven Value Intelligence Core</span>
           <span style={{ fontSize: 11, color: theme.muted }}>Mahindra University · SE Project · 2026</span>
         </footer>
       </div>
+
+      {showLogin && <LoginModal onLogin={handleLogin} onClose={() => setShowLogin(false)} />}
+
+      {notification && (
+        <div style={{
+          position: 'fixed', bottom: 24, right: 24, zIndex: 999,
+          background: notification.type === 'error' ? theme.red + '18'
+            : notification.type === 'info' ? theme.blue + '18'
+            : theme.accent + '18',
+          border: `1px solid ${notification.type === 'error' ? theme.red
+            : notification.type === 'info' ? theme.blue
+            : theme.accent}40`,
+          color: notification.type === 'error' ? theme.red
+            : notification.type === 'info' ? theme.blue
+            : theme.accent,
+          padding: '12px 18px', borderRadius: 10, fontSize: 13,
+          fontFamily: "'Outfit', sans-serif", maxWidth: 320,
+          animation: 'fadeUp 0.2s ease',
+        }}>
+          {notification.message}
+        </div>
+      )}
     </>
   );
 }
