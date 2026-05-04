@@ -3,12 +3,22 @@ venv/
 __pycache__/
 *.pyc
 *.pyo
+*.pyd
+.Python
+*.egg-info/
+.pytest_cache/
 
 # Node
 server/node_modules/
 frontend/node_modules/
 backend/node_modules/
+.npm
+
+# Environment variables — NEVER commit these
 backend/.env
+.env
+.env.local
+.env.production
 
 # Credentials (contains hardcoded DB password — never commit)
 server/database.json
@@ -16,10 +26,33 @@ server/database.json
 # Environment files with secrets
 database/.env
 
+# ML model files — add manually to server, never commit
+*.h5
+*.pkl
+*.keras
+/backend/ml/models/*
+!/backend/ml/models/.gitkeep
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
 # IDE / Claude
 .claude/
 .claude-helper.log
+.vscode/settings.json
+.idea/
+
+# Build output
+frontend/dist/
+frontend/build/
+
+# Test artifacts
+coverage/
 
 # Misc
 nul
-*.log
