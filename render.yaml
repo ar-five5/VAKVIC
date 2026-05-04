@@ -1,3 +1,9 @@
+databases:
+  - name: vakvic-db
+    databaseName: vakvic
+    user: vakvic
+    plan: free
+
 services:
   - type: web
     name: vakvic-backend
@@ -8,9 +14,11 @@ services:
     healthCheckPath: /api/v1/health
     envVars:
       - key: DATABASE_URL
-        sync: false
+        fromDatabase:
+          name: vakvic-db
+          property: connectionString
       - key: JWT_SECRET
-        sync: false
+        generateValue: true
       - key: JWT_EXPIRES_IN
         value: 24h
       - key: NODE_ENV
@@ -19,14 +27,26 @@ services:
         value: 3001
       - key: PYTHON_PATH
         value: python
+      - key: INGEST_ON_START
+        value: true
       - key: FRONTEND_URL
-        sync: false
+        fromService:
+          type: web
+          name: vakvic-frontend
+          envVarKey: RENDER_EXTERNAL_URL
 
-  - type: static
+  - type: web
     name: vakvic-frontend
+    runtime: static
     buildCommand: cd frontend && npm install && npm run build
     staticPublishPath: ./frontend/dist
     pullRequestPreviewsEnabled: false
+    envVars:
+      - key: VITE_API_BASE_URL
+        fromService:
+          type: web
+          name: vakvic-backend
+          envVarKey: RENDER_EXTERNAL_URL
     routes:
       - type: rewrite
         source: /*

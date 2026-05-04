@@ -1,4 +1,14 @@
-const BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api/v1';
+const resolveBaseUrl = () => {
+  const configured = import.meta.env.VITE_API_BASE_URL?.trim();
+  const fallback = import.meta.env.PROD
+    ? 'https://vakvic-backend.onrender.com'
+    : 'http://localhost:3001';
+
+  const base = (configured || fallback).replace(/\/+$/, '');
+  return base.endsWith('/api/v1') ? base : `${base}/api/v1`;
+};
+
+const BASE_URL = resolveBaseUrl();
 
 const request = async (method, path, body = null) => {
   const token = localStorage.getItem('vakvic_token');

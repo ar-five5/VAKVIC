@@ -20,4 +20,4 @@ COPY . .
 
 EXPOSE 3001
 
-CMD ["sh", "-c", "npm run migrate:up && node server.js"]
+CMD ["sh", "-c", "npm run migrate:up && npm run seed && node server.js"]

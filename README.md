@@ -4,14 +4,14 @@ Value Analytics & Knowledge-driven Value Intelligence Core
 A web-based financial analytics platform for the Indian market (NIFTY 50).
 
 ## Project Structure
-```
+```text
 vakvic/
-├── frontend/     — React.js frontend (Vite)
-├── backend/      — Express/Node.js REST API
-│   ├── src/      — Feature-based source code
-│   ├── ml/       — Python ML scripts
-│   └── migrations/ — node-pg-migrate files
-└── render.yaml   — Render deployment config
+├── frontend/      React + Vite frontend
+├── backend/       Express/Node.js REST API
+│   ├── src/       Feature-based API source
+│   ├── ml/        Python ML scripts
+│   └── migrations/ node-pg-migrate files
+└── render.yaml    Render Blueprint deployment config
 ```
 
 ## Team
@@ -34,7 +34,7 @@ vakvic/
 ### Backend
 ```bash
 cd backend
-cp .env.example .env        # fill in your credentials
+cp .env.example .env
 npm install
 pip install -r requirements.txt
 npm run migrate:up
@@ -49,9 +49,10 @@ npm install
 npm run dev
 ```
 
-### ML Scripts (standalone)
+### ML Scripts
+Run these from `backend/`:
+
 ```bash
-cd backend
 python ml/ingest.py --ticker RELIANCE.NS
 python ml/score.py --asset_ids 1,2
 python ml/predict.py --asset_id 1 --horizon 7
@@ -59,7 +60,7 @@ python ml/optimize.py --capital 500000 --risk Medium --horizon 12
 ```
 
 ## API Endpoints
-Base URL: `http://localhost:3001/api/v1`
+Base URL locally: `http://localhost:3001/api/v1`
 
 | Method | Endpoint                        | Auth | Description              |
 |--------|---------------------------------|------|--------------------------|
@@ -85,8 +86,15 @@ Base URL: `http://localhost:3001/api/v1`
 | GET    | /ingestion/status               | No   | Last ingestion status    |
 | POST   | /ingestion/trigger              | Yes  | Trigger ingestion        |
 
-## Deployment (Render)
-See `render.yaml` at the repo root. Required env vars to set manually in the Render dashboard:
-- `DATABASE_URL` — your PostgreSQL connection string
-- `JWT_SECRET` — random secure string
-- `FRONTEND_URL` — your deployed frontend URL (set after first frontend deploy)
+## Deployment On Render
+This repo is configured for a Render Blueprint deploy from `render.yaml`.
+
+1. Push `main` to GitHub.
+2. In Render, create a new Blueprint from `https://github.com/ar-five5/VAKVIC`.
+3. Render will create `vakvic-db`, `vakvic-backend`, and `vakvic-frontend`.
+4. The backend runs migrations and seeds the asset list on startup.
+5. `INGEST_ON_START=true` starts market-data ingestion after the API boots.
+
+The frontend uses `VITE_API_BASE_URL` from the backend service URL at build time, then appends `/api/v1` automatically. The backend uses the frontend service URL for production CORS.
+
+Render's free Postgres plan is useful for demos, but free databases can expire. Move `vakvic-db` to a paid plan before using this as a long-lived production deployment.
