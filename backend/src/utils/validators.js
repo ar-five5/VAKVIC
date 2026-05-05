@@ -1,7 +1,11 @@
 /** Validates registration input — returns array of error strings. */
 export const validateRegistration = (email, password) => {
   const errors = [];
-  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+  if (!email || typeof email !== 'string' ||
+      email.length > 254 ||
+      !email.includes('@') ||
+      email.indexOf('@') !== email.lastIndexOf('@') ||
+      email.split('@')[1]?.indexOf('.') === -1) {
     errors.push('Valid email is required');
   }
   if (!password || password.length < 8) {

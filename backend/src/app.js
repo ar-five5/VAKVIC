@@ -10,6 +10,7 @@ import portfolioRoutes from './features/portfolio/portfolio.routes.js';
 import ingestionRoutes from './features/ingestion/ingestion.routes.js';
 import { getLastRun } from './features/ingestion/ingestion.store.js';
 import errorHandler from './middleware/errorHandler.js';
+import { apiLimiter, authLimiter, mlLimiter } from './middleware/rateLimiter.js';
 import { pool } from './db/pool.js';
 
 const app = express();
@@ -34,6 +35,7 @@ app.use(cors({
   credentials: true
 }));
 app.use(express.json());
+app.use(apiLimiter);
 
 app.get('/api/v1/health', async (req, res) => {
   let database = 'connected';
@@ -45,12 +47,12 @@ app.get('/api/v1/health', async (req, res) => {
   res.json({ status: 'ok', timestamp: new Date(), database, ingestion: getLastRun() });
 });
 
-app.use('/api/v1/auth', authRoutes);
+app.use('/api/v1/auth', authLimiter, authRoutes);
 app.use('/api/v1/assets', assetRoutes);
 app.use('/api/v1/watchlist', watchlistRoutes);
-app.use('/api/v1/predictions', predictionRoutes);
-app.use('/api/v1/comparisons', comparisonRoutes);
-app.use('/api/v1/portfolio', portfolioRoutes);
+app.use('/api/v1/predictions', mlLimiter, predictionRoutes);
+app.use('/api/v1/comparisons', mlLimiter, comparisonRoutes);
+app.use('/api/v1/portfolio', mlLimiter, portfolioRoutes);
 app.use('/api/v1/ingestion', ingestionRoutes);
 
 app.use(errorHandler);
