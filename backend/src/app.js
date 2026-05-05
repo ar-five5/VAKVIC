@@ -15,8 +15,20 @@ import { pool } from './db/pool.js';
 
 const app = express();
 
+const normalizeFrontendOrigins = (value) => {
+  if (!value) return [];
+  return value
+    .split(',')
+    .map((origin) => origin.trim().replace(/\/+$/, ''))
+    .filter(Boolean)
+    .flatMap((origin) => {
+      if (/^https?:\/\//i.test(origin)) return [origin];
+      return [`https://${origin}`, `http://${origin}`];
+    });
+};
+
 const allowedOrigins = process.env.NODE_ENV === 'production'
-  ? [process.env.FRONTEND_URL].filter(Boolean)
+  ? normalizeFrontendOrigins(process.env.FRONTEND_URL)
   : [
       'http://localhost:5173',
       'http://localhost:5174',
@@ -26,10 +38,20 @@ const allowedOrigins = process.env.NODE_ENV === 'production'
       'http://127.0.0.1:3000',
     ];
 
+const isLocalDevOrigin = (origin) => {
+  if (process.env.NODE_ENV === 'production') return false;
+  try {
+    const url = new URL(origin);
+    return ['localhost', '127.0.0.1', '::1'].includes(url.hostname);
+  } catch {
+    return false;
+  }
+};
+
 app.use(cors({
   origin: (origin, callback) => {
     if (!origin) return callback(null, true);
-    if (allowedOrigins.includes(origin)) return callback(null, true);
+    if (allowedOrigins.includes(origin) || isLocalDevOrigin(origin)) return callback(null, true);
     callback(new Error('Not allowed by CORS'));
   },
   credentials: true

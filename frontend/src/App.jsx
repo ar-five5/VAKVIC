@@ -339,8 +339,9 @@ function TickerBar({ tickers = tickerData }) {
 }
 
 // ─── Navbar ───────────────────────────────────────────────────────────────────
-function Navbar({ page, setPage, authToken, onLoginRequest, onLogout }) {
+function Navbar({ page, setPage, authToken, currentUser, onLoginRequest, onLogout }) {
   const nav = ["Dashboard", "Predict", "Compare", "Portfolio"];
+  const userInitial = currentUser?.email?.trim()?.charAt(0)?.toUpperCase() || "✓";
   return (
     <nav style={{ background: `${theme.bg}E0`, backdropFilter: "blur(16px)", borderBottom: `1px solid ${theme.border}`, padding: "0 28px", display: "flex", alignItems: "center", gap: 8, height: 56, position: "sticky", top: 0, zIndex: 100 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginRight: 24 }}>
@@ -358,20 +359,21 @@ function Navbar({ page, setPage, authToken, onLoginRequest, onLogout }) {
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
         <div style={{ width: 8, height: 8, borderRadius: "50%", background: theme.accent, animation: "pulse 2s infinite" }} />
         <span style={{ fontSize: 12, color: theme.sub, fontFamily: "'DM Mono', monospace" }}>LIVE</span>
-        <div
-          onClick={() => { if (!authToken) onLoginRequest(); }}
-          title={authToken ? "Logged in" : "Click to login"}
-          style={{ width: 32, height: 32, borderRadius: "50%",
-            background: authToken
-              ? `linear-gradient(135deg, ${theme.accent}, ${theme.blue})`
-              : `linear-gradient(135deg, ${theme.purple}, ${theme.blue})`,
-            display: "flex", alignItems: "center", justifyContent: "center",
-            fontSize: 12, fontWeight: 600, cursor: "pointer",
-            border: authToken ? `2px solid ${theme.accent}60` : "none" }}>
-          {authToken ? "✓" : "A"}
-        </div>
-        {authToken && (
-          <button className="btn-ghost" style={{ padding: "6px 12px", fontSize: 12 }} onClick={onLogout}>Logout</button>
+        {authToken ? (
+          <>
+            <div
+              title={currentUser?.email ? currentUser.email : "Logged in"}
+              style={{ width: 32, height: 32, borderRadius: "50%",
+                background: `linear-gradient(135deg, ${theme.accent}, ${theme.blue})`,
+                display: "flex", alignItems: "center", justifyContent: "center",
+                fontSize: 12, fontWeight: 600,
+                border: `2px solid ${theme.accent}60` }}>
+              {userInitial}
+            </div>
+            <button className="btn-ghost" style={{ padding: "6px 12px", fontSize: 12 }} onClick={onLogout}>Logout</button>
+          </>
+        ) : (
+          <button className="btn-ghost" style={{ padding: "6px 12px", fontSize: 12 }} onClick={onLoginRequest}>Login</button>
         )}
       </div>
     </nav>
@@ -610,6 +612,7 @@ function Predict({ authToken, notify }) {
       const asset = liveAssets.find(a => a.asset_id === parseInt(selected));
       const symbol = asset?.ticker_symbol?.replace('.NS', '').replace('.BO', '') ?? selected;
       const predicted = parseFloat(latest?.predicted_close ?? latest?.predicted_price ?? 0);
+      const current = parseFloat(latest?.current_close ?? latest?.current_price ?? asset?.latest_price ?? 0);
       const predictedSeries = rows
         .map(r => parseFloat(r?.predicted_close ?? r?.predicted_price))
         .filter(v => Number.isFinite(v));
@@ -627,7 +630,7 @@ function Predict({ authToken, notify }) {
           : p;
         return {
           sym: symbol,
-          current: 0,
+          current: Number.isFinite(current) ? current : 0,
           predicted: p,
           horizon: `${r?.horizon_days ?? horizon}d`,
           confidence: conf,
@@ -637,7 +640,7 @@ function Predict({ authToken, notify }) {
 
       setResult({
         sym: symbol,
-        current: 0,
+        current: Number.isFinite(current) ? current : 0,
         predicted,
         horizon: `${horizon}d`,
         confidence: conf,
@@ -1080,7 +1083,7 @@ function Compare({ authToken, notify }) {
       {analyzed && (
         <div style={{ display: "grid", gridTemplateColumns: "1fr auto 1fr", gap: 16, alignItems: "start" }}>
           {[L, R].map((asset, side) => (
-            <div key={side} className={`fade-up-${side + 1} card`} style={{ padding: "22px", border: asset.sym === winner ? `1px solid ${theme.accent}60` : undefined }}>
+            <div key={side} className={`fade-up-${side + 1} card`} style={{ gridColumn: side === 0 ? "1" : "3", padding: "22px", border: asset.sym === winner ? `1px solid ${theme.accent}60` : undefined }}>
               {asset.sym === winner && (
                 <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}>
                   <span className="tag tag-green">★ Recommended</span>
@@ -1116,7 +1119,7 @@ function Compare({ authToken, notify }) {
           ))}
 
           {/* Center Divider */}
-          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 10, paddingTop: 60 }}>
+          <div style={{ gridColumn: "2", gridRow: "1", display: "flex", flexDirection: "column", alignItems: "center", gap: 10, paddingTop: 60 }}>
             <div style={{ width: 1, height: 60, background: theme.border }} />
             <div style={{ width: 32, height: 32, borderRadius: "50%", background: theme.surface, border: `1px solid ${theme.border}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, color: theme.muted }}>VS</div>
             <div style={{ width: 1, flex: 1, background: theme.border }} />
@@ -1486,7 +1489,15 @@ function LoginModal({ onLogin, onClose }) {
 export default function App() {
   const [page, setPage] = useState("Dashboard");
   const [authToken, setAuthToken] = useState(localStorage.getItem('vakvic_token') || null);
-  const [currentUser, setCurrentUser] = useState(null);
+  const [currentUser, setCurrentUser] = useState(() => {
+    const raw = localStorage.getItem('vakvic_user');
+    if (!raw) return null;
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  });
   const [showLogin, setShowLogin] = useState(false);
   const [notification, setNotification] = useState(null);
   const [liveTickers, setLiveTickers] = useState(tickerData);
@@ -1498,6 +1509,7 @@ export default function App() {
 
   const handleLogin = (token, user) => {
     localStorage.setItem('vakvic_token', token);
+    localStorage.setItem('vakvic_user', JSON.stringify(user));
     setAuthToken(token);
     setCurrentUser(user);
     setShowLogin(false);
@@ -1506,6 +1518,7 @@ export default function App() {
 
   const handleLogout = () => {
     localStorage.removeItem('vakvic_token');
+    localStorage.removeItem('vakvic_user');
     setAuthToken(null);
     setCurrentUser(null);
     notify('Signed out', 'success');
@@ -1519,6 +1532,7 @@ export default function App() {
           page={page}
           setPage={setPage}
           authToken={authToken}
+          currentUser={currentUser}
           onLoginRequest={() => setShowLogin(true)}
           onLogout={handleLogout}
         />

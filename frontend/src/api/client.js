@@ -10,15 +10,27 @@ const resolveBaseUrl = () => {
 
 const BASE_URL = resolveBaseUrl();
 
+const networkErrorMessage = () => {
+  if (BASE_URL.includes('.railway.internal')) {
+    return 'Cannot reach Railway private backend URL from the browser. Set VITE_API_BASE_URL to the public backend domain.';
+  }
+  return `Unable to reach VAKVIC API at ${BASE_URL}. Check that the backend is running and CORS is configured.`;
+};
+
 const request = async (method, path, body = null) => {
   const token = localStorage.getItem('vakvic_token');
   const headers = { 'Content-Type': 'application/json' };
   if (token) headers['Authorization'] = `Bearer ${token}`;
-  const res = await fetch(`${BASE_URL}${path}`, {
-    method,
-    headers,
-    body: body ? JSON.stringify(body) : null,
-  });
+  let res;
+  try {
+    res = await fetch(`${BASE_URL}${path}`, {
+      method,
+      headers,
+      body: body ? JSON.stringify(body) : null,
+    });
+  } catch {
+    throw { status: 0, message: networkErrorMessage() };
+  }
   const text = await res.text();
   let data = {};
   try {
