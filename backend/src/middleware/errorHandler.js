@@ -20,6 +20,14 @@ export default function errorHandler(err, req, res, next) {
     statusCode = 400;
     code = 'VALIDATION_ERROR';
     message = 'Invalid reference to a related resource';
+  } else if (err.type === 'entity.parse.failed') {
+    statusCode = 400;
+    code = 'VALIDATION_ERROR';
+    message = 'Invalid JSON body';
+  } else if (err.message === 'Not allowed by CORS') {
+    statusCode = 403;
+    code = 'CORS_NOT_ALLOWED';
+    message = 'Origin is not allowed';
   }
 
   if (statusCode >= 500) {

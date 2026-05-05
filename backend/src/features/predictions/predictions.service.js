@@ -2,7 +2,9 @@ import { query } from '../../db/pool.js';
 import {
   getStaleOrMissing,
 } from '../../db/helpers/predictions.helper.js';
+import { getAssetById } from '../../db/helpers/assets.helper.js';
 import { runPython } from '../../utils/runPython.js';
+import AppError from '../../utils/AppError.js';
 
 const VALID_HORIZONS = [7, 14, 30, 90];
 
@@ -17,6 +19,11 @@ async function fetchAllPredictions(assetId, horizonDays) {
 }
 
 export async function getPrediction(assetId, horizonDays) {
+  const asset = await getAssetById(assetId);
+  if (!asset) {
+    throw new AppError('Asset not found', 404, 'NOT_FOUND');
+  }
+
   const isStale = await getStaleOrMissing(assetId, horizonDays);
 
   if (isStale) {
@@ -30,11 +37,16 @@ export async function getPrediction(assetId, horizonDays) {
   return {
     predictions,
     isStale,
-    generatedAt: predictions[0]?.generated_at ?? null,
+    generatedAt: predictions[predictions.length - 1]?.generated_at ?? null,
   };
 }
 
 export async function triggerPrediction(assetId, horizonDays) {
+  const asset = await getAssetById(assetId);
+  if (!asset) {
+    throw new AppError('Asset not found', 404, 'NOT_FOUND');
+  }
+
   const result = await runPython('predict.py', [
     '--asset_id', String(assetId),
     '--horizon', String(horizonDays),

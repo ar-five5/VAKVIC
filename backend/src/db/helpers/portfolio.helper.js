@@ -50,8 +50,20 @@ export async function getPortfolioById(portfolioId) {
        COALESCE(pa.allocations, '[]'::json) AS assets
      FROM portfolios p
      LEFT JOIN LATERAL (
-       SELECT json_agg(pa ORDER BY pa.id) AS allocations
+       SELECT json_agg(
+         json_build_object(
+           'id', pa.id,
+           'portfolio_id', pa.portfolio_id,
+           'asset_id', pa.asset_id,
+           'ticker', a.ticker_symbol,
+           'asset_name', a.asset_name,
+           'allocation_pct', pa.allocation_pct,
+           'amount_inr', pa.amount_inr
+         )
+         ORDER BY pa.id
+       ) AS allocations
        FROM portfolio_assets pa
+       JOIN assets a ON a.asset_id = pa.asset_id
        WHERE pa.portfolio_id = p.portfolio_id
      ) pa ON true
      WHERE p.portfolio_id = $1`,

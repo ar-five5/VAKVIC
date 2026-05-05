@@ -1,7 +1,7 @@
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import AppError from '../../utils/AppError.js';
-import { validateRegistration } from '../../utils/validators.js';
+import { validateLogin, validateRegistration } from '../../utils/validators.js';
 import {
   createUser,
   findByEmail,
@@ -15,6 +15,9 @@ const LOCKOUT_THRESHOLD = 5;
 const LOCKOUT_DURATION_MS = 30 * 60 * 1000;
 
 function signToken(userId, email) {
+  if (!process.env.JWT_SECRET) {
+    throw new AppError('JWT_SECRET is not configured', 500, 'CONFIGURATION_ERROR');
+  }
   return jwt.sign(
     { userId, email },
     process.env.JWT_SECRET,
@@ -29,13 +32,14 @@ export async function registerUser(email, password) {
     throw new AppError(errors.join(', '), 400, 'VALIDATION_ERROR');
   }
 
-  const existing = await findByEmail(email);
+  const normalizedEmail = email.trim().toLowerCase();
+  const existing = await findByEmail(normalizedEmail);
   if (existing) {
     throw new AppError('Email already registered', 409, 'DUPLICATE_ENTRY');
   }
 
   const passwordHash = await bcrypt.hash(password, 12);
-  const user = await createUser(email, passwordHash);
+  const user = await createUser(normalizedEmail, passwordHash);
   const token = signToken(user.user_id, user.email);
 
   return { token, user: { userId: user.user_id, email: user.email } };
@@ -43,7 +47,12 @@ export async function registerUser(email, password) {
 
 /** Authenticate a user, handle lockout, return JWT + minimal user info. */
 export async function loginUser(email, password) {
-  const user = await findByEmail(email);
+  const errors = validateLogin(email, password);
+  if (errors.length > 0) {
+    throw new AppError(errors.join(', '), 400, 'VALIDATION_ERROR');
+  }
+
+  const user = await findByEmail(email.trim().toLowerCase());
   if (!user) {
     throw new AppError('Invalid credentials', 401, 'UNAUTHORIZED');
   }

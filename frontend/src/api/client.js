@@ -19,7 +19,13 @@ const request = async (method, path, body = null) => {
     headers,
     body: body ? JSON.stringify(body) : null,
   });
-  const data = await res.json();
+  const text = await res.text();
+  let data = {};
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch {
+    data = { message: text || 'Request failed' };
+  }
   if (!res.ok) throw { status: res.status, message: data.error?.message || data.message || 'Request failed' };
   return data;
 };

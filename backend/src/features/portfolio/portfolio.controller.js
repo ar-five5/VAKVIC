@@ -1,5 +1,6 @@
 import catchAsync from '../../utils/catchAsync.js';
 import AppError from '../../utils/AppError.js';
+import { parsePositiveInteger } from '../../utils/validators.js';
 import * as portfolioService from './portfolio.service.js';
 
 const VALID_RISK = ['Low', 'Medium', 'High'];
@@ -32,7 +33,14 @@ export const optimizePortfolio = catchAsync(async (req, res) => {
     time_horizon
   );
 
-  res.status(201).json({ portfolio });
+  res.status(201).json({
+    portfolio,
+    portfolio_id: portfolio.portfolio_id,
+    portfolioId: portfolio.portfolioId,
+    allocations: portfolio.allocations,
+    expected_return: portfolio.expected_return,
+    expected_volatility: portfolio.expected_volatility,
+  });
 });
 
 /** GET /api/v1/portfolio/history [protected] */
@@ -43,10 +51,17 @@ export const getHistory = catchAsync(async (req, res) => {
 
 /** GET /api/v1/portfolio/:id [protected] */
 export const getPortfolio = catchAsync(async (req, res) => {
-  const id = parseInt(req.params.id, 10);
-  if (isNaN(id)) {
+  const id = parsePositiveInteger(req.params.id);
+  if (!id) {
     throw new AppError('Invalid portfolio ID', 400, 'VALIDATION_ERROR');
   }
   const portfolio = await portfolioService.getPortfolio(id, req.user.userId);
-  res.json({ portfolio });
+  res.json({
+    portfolio,
+    portfolio_id: portfolio.portfolio_id,
+    portfolioId: portfolio.portfolioId ?? portfolio.portfolio_id,
+    allocations: portfolio.allocations,
+    expected_return: portfolio.expected_return,
+    expected_volatility: portfolio.expected_volatility,
+  });
 });

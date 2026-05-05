@@ -4,11 +4,12 @@ exports.up = (pgm) => {
   pgm.sql('DROP VIEW IF EXISTS daily_returns, latest_prices CASCADE;');
   pgm.sql(`
     DROP TABLE IF EXISTS
-      watchlist, portfolio_allocations, portfolios, comparisons,
-      asset_metrics, predictions, historical_prices, users, assets
+      watchlist, portfolio_assets, portfolio_allocations, portfolios,
+      asset_comparisons, comparisons, asset_metrics, predictions,
+      asset_prices, historical_prices, users, assets
     CASCADE;
   `);
-  pgm.sql('DROP TYPE IF EXISTS prediction_status, risk_level, asset_type CASCADE;');
+  pgm.sql('DROP TYPE IF EXISTS prediction_status, risk_level, asset_type, risk_tolerance_enum, asset_class_enum CASCADE;');
   pgm.sql('DROP FUNCTION IF EXISTS update_updated_at() CASCADE;');
 
   // ── Enums ──────────────────────────────────────────────────────────────────

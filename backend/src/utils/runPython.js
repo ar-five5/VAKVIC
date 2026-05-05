@@ -1,12 +1,42 @@
 import { spawn } from 'child_process';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import AppError from './AppError.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ML_DIR = path.resolve(__dirname, '../../ml');
 
 const ALLOWED_SCRIPTS = new Set(['ingest.py', 'score.py', 'predict.py', 'optimize.py']);
 const TIMEOUT_MS = 120_000;
+
+function parsePythonJson(stdout) {
+  const trimmed = stdout.trim();
+  const jsonStart = trimmed.search(/[\[{]/);
+  const jsonStr = jsonStart >= 0 ? trimmed.slice(jsonStart) : trimmed;
+  try {
+    return JSON.parse(jsonStr);
+  } catch (err) {
+    const lastBrace = Math.max(jsonStr.lastIndexOf('}'), jsonStr.lastIndexOf(']'));
+    if (lastBrace >= 0) {
+      return JSON.parse(jsonStr.slice(0, lastBrace + 1));
+    }
+    throw err;
+  }
+}
+
+function pythonFailure(script, stdout, stderr, code) {
+  try {
+    const parsed = parsePythonJson(stdout);
+    if (parsed && parsed.success === false) {
+      return new AppError(parsed.error || `${script} failed`, 422, 'ML_SCRIPT_ERROR');
+    }
+  } catch {
+    // Fall through to the generic execution error below.
+  }
+
+  const detail = stderr.trim() || stdout.trim() || `exit code ${code}`;
+  return new AppError(`Python script ${script} failed: ${detail}`, 502, 'PYTHON_EXECUTION_ERROR');
+}
 
 /**
  * Runs a Python ML script and returns parsed JSON output.
@@ -17,7 +47,7 @@ const TIMEOUT_MS = 120_000;
 export const runPython = (script, args = []) => {
   return new Promise((resolve, reject) => {
     if (!ALLOWED_SCRIPTS.has(script)) {
-      return reject(new Error(`Script not allowed: ${script}`));
+      return reject(new AppError(`Script not allowed: ${script}`, 400, 'VALIDATION_ERROR'));
     }
 
     const pythonPath = process.env.PYTHON_PATH || 'python';
@@ -30,45 +60,42 @@ export const runPython = (script, args = []) => {
 
     let stdout = '';
     let stderr = '';
+    let settled = false;
+
+    const finish = (fn, value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      fn(value);
+    };
 
     proc.stdout.on('data', (d) => { stdout += d.toString(); });
     proc.stderr.on('data', (d) => { stderr += d.toString(); });
 
     const timer = setTimeout(() => {
       proc.kill('SIGTERM');
-      reject(new Error(`Python script ${script} timed out after ${TIMEOUT_MS / 1000}s`));
+      finish(
+        reject,
+        new AppError(`Python script ${script} timed out after ${TIMEOUT_MS / 1000}s`, 504, 'PYTHON_TIMEOUT')
+      );
     }, TIMEOUT_MS);
 
     proc.on('close', (code) => {
-      clearTimeout(timer);
       if (code !== 0) {
-        return reject(new Error(
-          `Python script ${script} exited ${code}: ${stderr}`
-        ));
+        return finish(reject, pythonFailure(script, stdout, stderr, code));
       }
       try {
-        const trimmed = stdout.trim();
-        const jsonStart = trimmed.search(/[\[{]/);
-        const jsonStr = jsonStart >= 0 ? trimmed.slice(jsonStart) : trimmed;
-        try {
-          resolve(JSON.parse(jsonStr));
-        } catch (err) {
-          const lastBrace = Math.max(jsonStr.lastIndexOf('}'), jsonStr.lastIndexOf(']'));
-          if (lastBrace >= 0) {
-            const clipped = jsonStr.slice(0, lastBrace + 1);
-            resolve(JSON.parse(clipped));
-            return;
-          }
-          throw err;
-        }
+        finish(resolve, parsePythonJson(stdout));
       } catch {
-        reject(new Error(`Failed to parse JSON from ${script}: ${stdout}`));
+        finish(
+          reject,
+          new AppError(`Failed to parse JSON from ${script}: ${stdout}`, 502, 'PYTHON_PARSE_ERROR')
+        );
       }
     });
 
     proc.on('error', (err) => {
-      clearTimeout(timer);
-      reject(err);
+      finish(reject, new AppError(`Unable to start Python: ${err.message}`, 502, 'PYTHON_EXECUTION_ERROR'));
     });
   });
 };

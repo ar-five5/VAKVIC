@@ -4,6 +4,7 @@ import {
   removeFromWatchlist as dbRemove,
   isInWatchlist as dbExists,
 } from '../../db/helpers/watchlist.helper.js';
+import { getAssetById as dbGetAssetById } from '../../db/helpers/assets.helper.js';
 
 export const getWatchlist = (userId) => dbGet(userId);
 
@@ -12,3 +13,5 @@ export const addToWatchlist = (userId, assetId) => dbAdd(userId, assetId);
 export const removeFromWatchlist = (userId, assetId) => dbRemove(userId, assetId);
 
 export const isInWatchlist = (userId, assetId) => dbExists(userId, assetId);
+
+export const getAssetById = (assetId) => dbGetAssetById(assetId);

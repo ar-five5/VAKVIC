@@ -1,12 +1,13 @@
 import catchAsync from '../../utils/catchAsync.js';
 import AppError from '../../utils/AppError.js';
+import { parsePositiveInteger } from '../../utils/validators.js';
 import * as predictionsService from './predictions.service.js';
 import { VALID_HORIZONS } from './predictions.service.js';
 
 /** GET /api/v1/predictions/:assetId?horizon=7 */
 export const getPrediction = catchAsync(async (req, res) => {
-  const assetId = parseInt(req.params.assetId, 10);
-  if (isNaN(assetId)) {
+  const assetId = parsePositiveInteger(req.params.assetId);
+  if (!assetId) {
     throw new AppError('Invalid asset ID', 400, 'VALIDATION_ERROR');
   }
 
@@ -30,8 +31,8 @@ export const getPrediction = catchAsync(async (req, res) => {
 
 /** POST /api/v1/predictions/trigger/:assetId [protected] */
 export const triggerPrediction = catchAsync(async (req, res) => {
-  const assetId = parseInt(req.params.assetId, 10);
-  if (isNaN(assetId)) {
+  const assetId = parsePositiveInteger(req.params.assetId);
+  if (!assetId) {
     throw new AppError('Invalid asset ID', 400, 'VALIDATION_ERROR');
   }
 

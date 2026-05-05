@@ -400,7 +400,7 @@ function Dashboard({ setPage, setTickers, authToken, notify }) {
           change: '+0.00%',
         })));
       })
-      .catch((err) => { console.warn('Failed to load assets', err); });
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -415,8 +415,7 @@ function Dashboard({ setPage, setTickers, authToken, notify }) {
       .then(({ watchlist }) => {
         setWatchlist(Array.isArray(watchlist) ? watchlist : []);
       })
-      .catch((err) => {
-        console.warn('Failed to load watchlist', err);
+      .catch(() => {
         setWatchlistError('Unable to load watchlist');
       })
       .finally(() => setWatchlistLoading(false));
@@ -989,17 +988,17 @@ function Compare({ authToken, notify }) {
   const winner = L.score > R.score ? L.sym : R.sym;
 
   const mapAsset = (a) => ({
-    sym: a.ticker?.replace('.NS', '').replace('.BO', '') ?? '',
-    name: a.name ?? '',
+    sym: (a.ticker_symbol ?? a.ticker ?? '').replace('.NS', '').replace('.BO', ''),
+    name: a.asset_name ?? a.name ?? '',
     price: '—',
     type: 'Stock',
-    score: Math.round(a.suitabilityScore ?? 50),
+    score: Math.round(a.suitability_score ?? a.suitabilityScore ?? 50),
     metrics: {
-      volatility: Math.min(100, Math.round(Math.abs((a.metrics?.volatility ?? 0.5) * 100))),
-      momentum:   Math.min(100, Math.max(0, Math.round((a.metrics?.trend_strength ?? 0.5) * 100))),
-      value:      Math.min(100, Math.max(0, Math.round(100 + (a.metrics?.max_drawdown ?? -0.5) * 100))),
+      volatility: Math.min(100, Math.round(Math.abs((a.volatility ?? a.metrics?.volatility ?? 0.5) * 100))),
+      momentum:   Math.min(100, Math.max(0, Math.round((a.trend_strength ?? a.metrics?.trend_strength ?? 0.5) * 100))),
+      value:      Math.min(100, Math.max(0, Math.round(100 + (a.max_drawdown ?? a.metrics?.max_drawdown ?? -0.5) * 100))),
       growth:     50,
-      quality:    Math.min(100, Math.max(0, Math.round((a.metrics?.sharpe_ratio ?? 1) * 30))),
+      quality:    Math.min(100, Math.max(0, Math.round((a.sharpe_ratio ?? a.metrics?.sharpe_ratio ?? 1) * 30))),
     },
   });
 
@@ -1009,13 +1008,12 @@ function Compare({ authToken, notify }) {
     setError('');
     try {
       const data = await createComparison([parseInt(leftSym), parseInt(rightSym)]);
-      const assets = data?.comparison?.assets ?? [];
+      const assets = data?.assets ?? data?.comparison?.assets ?? [];
       if (assets.length < 2) throw new Error('Comparison data unavailable');
       const [a1, a2] = assets;
       setLiveComparison({ left: mapAsset(a1), right: mapAsset(a2) });
       setAnalyzed(true);
     } catch (err) {
-      console.warn('Comparison failed', err);
       setLiveComparison(comparisonAssets);
       setAnalyzed(true);
       setError(err.message || 'Comparison failed — showing cached data');
@@ -1193,25 +1191,28 @@ function Portfolio({ authToken, notify, onLoginRequest }) {
     setError('');
     try {
       const data = await optimizePortfolio(parseFloat(capital), riskMap[risk], parseInt(horizon));
-      const portfolio = data?.portfolio;
-      if (!portfolio || !Array.isArray(portfolio.allocations)) {
+      const portfolio = data?.portfolio ?? data;
+      const allocations = Array.isArray(portfolio?.allocations) ? portfolio.allocations : [];
+      if (!portfolio || allocations.length === 0) {
         throw new Error('Optimization returned no allocations');
       }
-      const mapped = portfolio.allocations.map((a) => {
+      const mapped = allocations.map((a) => {
         const asset = liveAssets.find(la => la.asset_id === a.asset_id) || {};
+        const ticker = a.ticker ?? asset.ticker_symbol ?? `ASSET${a.asset_id}`;
+        const assetName = a.asset_name ?? a.assetName ?? asset.asset_name ?? '—';
         return {
-          sym: asset.ticker_symbol?.replace('.NS', '').replace('.BO', '') ?? `ASSET${a.asset_id}`,
-          name: asset.asset_name ?? '—',
+          sym: ticker.replace('.NS', '').replace('.BO', ''),
+          name: assetName,
           type: asset.asset_class === 'equity' ? 'Stock' : asset.asset_class ?? 'Stock',
-          weight: Math.round(a.allocation_pct),
-          value: Math.round(a.amount_inr),
+          weight: Math.round(Number(a.allocation_pct ?? a.allocationPct ?? 0)),
+          value: Math.round(Number(a.amount_inr ?? a.amountInr ?? 0)),
           change: '+0.00%',
           pos: true,
         };
       });
       setLivePortfolio(mapped);
-      const expectedReturn = Number(portfolio.expectedReturn);
-      const expectedVolatility = Number(portfolio.expectedVolatility);
+      const expectedReturn = Number(portfolio.expected_return ?? portfolio.expectedReturn);
+      const expectedVolatility = Number(portfolio.expected_volatility ?? portfolio.expectedVolatility);
       setPortfolioStats({
         expectedReturn: Number.isFinite(expectedReturn)
           ? `+${(expectedReturn * 100).toFixed(1)}%`
@@ -1225,7 +1226,6 @@ function Portfolio({ authToken, notify, onLoginRequest }) {
       });
       setOptimized(true);
     } catch (err) {
-      console.warn('Portfolio optimization failed', err);
       setOptimized(true);
       setError(err.message || 'Optimization failed — showing illustrative allocation');
     } finally {

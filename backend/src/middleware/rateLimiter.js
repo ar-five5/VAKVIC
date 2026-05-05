@@ -18,7 +18,7 @@ export const apiLimiter = rateLimit({
 
 export const mlLimiter = rateLimit({
   windowMs: 60 * 1000,
-  max: 10,
+  max: 30,
   message: { error: { code: 'RATE_LIMITED', message: 'Too many ML requests, wait a moment' } },
   standardHeaders: true,
   legacyHeaders: false
