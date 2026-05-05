@@ -12,8 +12,12 @@ import {
   logFallback,
   searchFallbackAssets,
 } from '../../db/fallbackData.js';
+import { seedStarterData } from '../../db/starterData.js';
+import { logger } from '../../utils/logger.js';
 
 /** Thin service layer — exists so future ML enrichment has a home without touching controllers. */
+
+let seedAttempt = null;
 
 const withFallback = async (area, dbOperation, fallbackOperation) => {
   try {
@@ -30,9 +34,33 @@ const withFallback = async (area, dbOperation, fallbackOperation) => {
   }
 };
 
+const ensureStarterAssets = async () => {
+  if (!seedAttempt) {
+    seedAttempt = seedStarterData()
+      .then((result) => {
+        logger.info(
+          `Starter data ensured: ${result.seededAssets} asset(s), ${result.seededPrices} price row(s) inserted`
+        );
+        return result;
+      })
+      .catch((err) => {
+        seedAttempt = null;
+        throw err;
+      });
+  }
+  return seedAttempt;
+};
+
 export const getAllAssets = () => withFallback(
   'assets',
-  () => dbGetAll(),
+  async () => {
+    let assets = await dbGetAll();
+    if (assets.length === 0) {
+      await ensureStarterAssets();
+      assets = await dbGetAll();
+    }
+    return assets;
+  },
   () => getFallbackAssets()
 );
 
